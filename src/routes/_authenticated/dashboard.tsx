@@ -50,7 +50,7 @@ function DashboardPage() {
     };
   }, [user.id]);
 
-  const running = jobs.filter((j) => j.status === "researching" || j.status === "planning" || j.status === "analyzing").length;
+  const running = jobs.filter((j) => j.status === "researching" || j.status === "planning").length;
   const done = jobs.filter((j) => j.status === "complete").length;
 
   return (
