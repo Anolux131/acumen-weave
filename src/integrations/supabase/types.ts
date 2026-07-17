@@ -22,6 +22,8 @@ export type Database = {
           detail: string | null
           id: string
           job_id: string
+          log_kind: string
+          metadata: Json | null
           status: Database["public"]["Enums"]["log_status"]
         }
         Insert: {
@@ -31,6 +33,8 @@ export type Database = {
           detail?: string | null
           id?: string
           job_id: string
+          log_kind?: string
+          metadata?: Json | null
           status?: Database["public"]["Enums"]["log_status"]
         }
         Update: {
@@ -40,6 +44,8 @@ export type Database = {
           detail?: string | null
           id?: string
           job_id?: string
+          log_kind?: string
+          metadata?: Json | null
           status?: Database["public"]["Enums"]["log_status"]
         }
         Relationships: [

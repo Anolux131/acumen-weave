@@ -1,11 +1,13 @@
 // Server-only research agent. Never import from client-reachable modules.
-// Uses Tavily (search) + Firecrawl (scrape) + Lovable AI Gateway (analysis).
+// Uses Tavily (search) + Firecrawl (scrape) + Lovable AI Gateway (analysis,
+// streamed so the UI can render live "thoughts").
 
 import { createClient } from "@supabase/supabase-js";
-import { getSection } from "./section-config";
+import { getSection, ACTIVE_SECTION_NUMBERS } from "./section-config";
 
-type TavilyResult = { url: string; title: string; content: string; raw_content?: string; score?: number };
+type TavilyResult = { url: string; title: string; content: string; score?: number };
 type ScrapeResult = { url: string; markdown: string; error?: string };
+type LogKind = "status" | "query" | "source" | "scrape" | "thought";
 
 const TAVILY_URL = "https://api.tavily.com/search";
 const FIRECRAWL_URL = "https://api.firecrawl.dev/v1/scrape";
@@ -18,9 +20,25 @@ function admin() {
   });
 }
 
-async function logAgent(jobId: string, agent: string, action: string, detail?: string, status: "started" | "working" | "done" | "error" = "working") {
+async function log(
+  jobId: string,
+  agent: string,
+  kind: LogKind,
+  action: string,
+  detail?: string,
+  metadata?: Record<string, unknown>,
+  status: "started" | "working" | "done" | "error" = "working",
+) {
   try {
-    await admin().from("agent_logs").insert({ job_id: jobId, agent_name: agent, action, detail: detail ?? null, status });
+    await admin().from("agent_logs").insert({
+      job_id: jobId,
+      agent_name: agent,
+      action,
+      detail: detail ?? null,
+      status,
+      log_kind: kind,
+      metadata: metadata ?? null,
+    });
   } catch (e) {
     console.error("agent_log insert failed", e);
   }
@@ -66,7 +84,16 @@ async function firecrawlScrape(url: string): Promise<ScrapeResult> {
   }
 }
 
-async function analyze(systemPrompt: string, userContext: string): Promise<{ text: string; tokens: number }> {
+/**
+ * Streamed analysis. Emits each ~180-char chunk to agent_logs as a "thought"
+ * so the UI can render the model's reasoning as it happens.
+ */
+async function analyzeStreamed(
+  jobId: string,
+  agent: string,
+  systemPrompt: string,
+  userContext: string,
+): Promise<{ text: string; tokens: number }> {
   const key = process.env.LOVABLE_API_KEY;
   if (!key) throw new Error("LOVABLE_API_KEY missing");
   const res = await fetch(LOVABLE_AI_URL, {
@@ -74,24 +101,65 @@ async function analyze(systemPrompt: string, userContext: string): Promise<{ tex
     headers: {
       "Content-Type": "application/json",
       "Lovable-API-Key": key,
-      "X-Lovable-AIG-SDK": "vercel-ai-sdk",
     },
     body: JSON.stringify({
       model: ANALYSIS_MODEL,
+      stream: true,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userContext },
       ],
     }),
   });
-  if (!res.ok) {
-    const body = await res.text();
+  if (!res.ok || !res.body) {
+    const body = await res.text().catch(() => "");
     throw new Error(`Lovable AI ${res.status}: ${body.slice(0, 400)}`);
   }
-  const j = await res.json();
-  const text: string = j?.choices?.[0]?.message?.content ?? "";
-  const tokens: number = j?.usage?.total_tokens ?? 0;
-  return { text, tokens };
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let full = "";
+  let pending = "";
+  const CHUNK = 180;
+
+  const flush = async (force = false) => {
+    while (pending.length >= CHUNK || (force && pending.length > 0)) {
+      const slice = pending.slice(0, CHUNK);
+      pending = pending.slice(slice.length);
+      await log(jobId, agent, "thought", "reasoning", slice);
+      if (!force) break;
+    }
+  };
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (!line.startsWith("data:")) continue;
+      const payload = line.slice(5).trim();
+      if (payload === "[DONE]") continue;
+      try {
+        const j = JSON.parse(payload);
+        const delta: string = j?.choices?.[0]?.delta?.content ?? "";
+        if (delta) {
+          full += delta;
+          pending += delta;
+          await flush(false);
+        }
+      } catch {
+        // ignore keepalives / partial frames
+      }
+    }
+  }
+  await flush(true);
+
+  // Rough token estimate (streaming responses may omit usage).
+  return { text: full, tokens: Math.round(full.length / 4) };
 }
 
 function extractConfidence(text: string): number {
@@ -140,32 +208,52 @@ export async function runSection(opts: {
     .update({ current_agent: agent, current_phase: `Running ${section.name}` })
     .eq("id", opts.jobId);
 
-  await logAgent(opts.jobId, agent, "Deploying research agent", section.focus, "started");
+  await log(opts.jobId, agent, "status", "Agent deployed", section.focus, { sectionNumber: section.number, sectionName: section.name }, "started");
 
   try {
     const url = normalizeUrl(opts.companyUrl);
     const queries = section.searchTemplates({ company: opts.companyName, url, industry: opts.industry }).slice(0, 6);
 
-    // 1. Search
-    await logAgent(opts.jobId, agent, `Running ${queries.length} Tavily searches`, queries.join(" • "));
-    const searchResults = (await Promise.all(queries.map(tavilySearch))).flat();
-    const uniqueByUrl = Array.from(new Map(searchResults.map((r) => [r.url, r])).values());
+    // 1. Search — log each query + top results with snippets as they come back.
+    const allResults: TavilyResult[] = [];
+    await Promise.all(
+      queries.map(async (q) => {
+        await log(opts.jobId, agent, "query", "Search", q, { query: q });
+        const rs = await tavilySearch(q);
+        allResults.push(...rs);
+        // log top 3 sources per query with snippet highlight
+        for (const r of rs.slice(0, 3)) {
+          await log(opts.jobId, agent, "source", "Source", r.title, {
+            url: r.url,
+            title: r.title,
+            snippet: (r.content ?? "").slice(0, 320),
+            score: r.score,
+            query: q,
+          });
+        }
+      }),
+    );
+    const uniqueByUrl = Array.from(new Map(allResults.map((r) => [r.url, r])).values());
     const topResults = uniqueByUrl.sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, 8);
-    await logAgent(opts.jobId, agent, `Found ${uniqueByUrl.length} results`, `Selecting top ${topResults.length} for scraping`);
 
-    // 2. Scrape top results in parallel + company-site paths
+    // 2. Scrape top + section-specific company paths
     const companySiteScrapes: string[] = [];
     if (url && section.scrapePaths) {
       const origin = new URL(url).origin;
       for (const p of section.scrapePaths) companySiteScrapes.push(`${origin}${p}`);
     }
-    const urlsToScrape = [...companySiteScrapes, ...topResults.slice(0, 5).map((r) => r.url)];
-    await logAgent(opts.jobId, agent, `Scraping ${urlsToScrape.length} pages via Firecrawl`);
-    const scrapes = await Promise.all(urlsToScrape.map(firecrawlScrape));
+    const urlsToScrape = Array.from(new Set([...companySiteScrapes, ...topResults.slice(0, 5).map((r) => r.url)]));
+    await log(opts.jobId, agent, "status", `Scraping ${urlsToScrape.length} pages`);
+    const scrapes = await Promise.all(
+      urlsToScrape.map(async (u) => {
+        const s = await firecrawlScrape(u);
+        await log(opts.jobId, agent, "scrape", s.markdown ? "Extracted" : "Skipped", s.error || `${s.markdown.length.toLocaleString()} chars`, { url: u, chars: s.markdown.length, error: s.error });
+        return s;
+      }),
+    );
     const successful = scrapes.filter((s) => s.markdown.length > 200);
-    await logAgent(opts.jobId, agent, `Extracted ${successful.length} pages`, `${successful.reduce((n, s) => n + s.markdown.length, 0).toLocaleString()} chars total`);
 
-    // 3. Build context (cap at ~30K chars to stay under model limits)
+    // 3. Build context (cap ~30K chars).
     const searchSnippets = topResults
       .map((r) => `### ${r.title}\nURL: ${r.url}\n${r.content}`)
       .join("\n\n")
@@ -187,9 +275,9 @@ ${scrapedContent}
 
 Analyze the above data and produce Section ${section.number}: ${section.name}. Follow the required output structure exactly.`;
 
-    // 4. Analyze
-    await logAgent(opts.jobId, agent, `Analyzing with ${ANALYSIS_MODEL}`);
-    const { text: analyzed, tokens } = await analyze(section.systemPrompt, userContext);
+    // 4. Streamed analysis (each chunk logged as a "thought").
+    await log(opts.jobId, agent, "status", `Synthesizing with ${ANALYSIS_MODEL}`);
+    const { text: analyzed, tokens } = await analyzeStreamed(opts.jobId, agent, section.systemPrompt, userContext);
     const confidence = extractConfidence(analyzed);
     const findings = extractKeyFindings(analyzed);
 
@@ -211,7 +299,24 @@ Analyze the above data and produce Section ${section.number}: ${section.name}. F
       .eq("job_id", opts.jobId)
       .eq("section_number", opts.sectionNumber);
 
-    await logAgent(opts.jobId, agent, "Section complete", `Confidence ${confidence}% • ${findings.length} key findings`, "done");
+    // Bump completed_sections counter atomically enough for a solo user.
+    const { data: doneRows } = await db
+      .from("section_results")
+      .select("status")
+      .eq("job_id", opts.jobId)
+      .eq("status", "complete");
+    await db
+      .from("research_jobs")
+      .update({
+        completed_sections: doneRows?.length ?? 0,
+        progress_percentage: Math.min(
+          99,
+          Math.round(((doneRows?.length ?? 0) / ACTIVE_SECTION_NUMBERS.length) * 100),
+        ),
+      })
+      .eq("id", opts.jobId);
+
+    await log(opts.jobId, agent, "status", "Section complete", `Confidence ${confidence}% • ${findings.length} findings`, { confidence, findings: findings.length }, "done");
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error(`Section ${opts.sectionNumber} failed:`, msg);
@@ -220,7 +325,7 @@ Analyze the above data and produce Section ${section.number}: ${section.name}. F
       .update({ status: "failed", analyzed_content: `Error: ${msg}`, processing_time_ms: Date.now() - t0 })
       .eq("job_id", opts.jobId)
       .eq("section_number", opts.sectionNumber);
-    await logAgent(opts.jobId, agent, "Section failed", msg, "error");
+    await log(opts.jobId, agent, "status", "Section failed", msg, { error: msg }, "error");
   }
 }
 
@@ -229,23 +334,36 @@ export async function runResearchJob(jobId: string): Promise<void> {
   const { data: job, error } = await db.from("research_jobs").select("*").eq("id", jobId).single();
   if (error || !job) throw new Error(`Job ${jobId} not found`);
 
-  await db.from("research_jobs").update({ status: "researching", current_phase: "Deploying agents", progress_percentage: 5 }).eq("id", jobId);
-  await logAgent(jobId, "Orchestrator", "Launching research agents", "Sections 1–4 running in parallel", "started");
+  const sections = ACTIVE_SECTION_NUMBERS;
 
-  const sections = [1, 2, 3, 4];
-  // Run all 4 sections in parallel
-  await Promise.all(
-    sections.map((n) =>
-      runSection({
-        jobId,
-        userId: job.user_id,
-        sectionNumber: n,
-        companyName: job.company_name,
-        companyUrl: job.company_url ?? undefined,
-        industry: job.industry ?? undefined,
-      }),
-    ),
-  );
+  await db
+    .from("research_jobs")
+    .update({
+      status: "researching",
+      current_phase: `Deploying ${sections.length} agents`,
+      progress_percentage: 5,
+      total_sections: sections.length,
+    })
+    .eq("id", jobId);
+  await log(jobId, "Orchestrator", "status", "Launching agents", `${sections.length} sections in parallel`, { sections }, "started");
+
+  // Fan out — throttle in waves of 5 to stay under provider rate limits.
+  const WAVE = 5;
+  for (let i = 0; i < sections.length; i += WAVE) {
+    const wave = sections.slice(i, i + WAVE);
+    await Promise.all(
+      wave.map((n) =>
+        runSection({
+          jobId,
+          userId: job.user_id,
+          sectionNumber: n,
+          companyName: job.company_name,
+          companyUrl: job.company_url ?? undefined,
+          industry: job.industry ?? undefined,
+        }),
+      ),
+    );
+  }
 
   const { data: results } = await db.from("section_results").select("status").eq("job_id", jobId);
   const completed = (results ?? []).filter((r) => r.status === "complete").length;
@@ -259,9 +377,14 @@ export async function runResearchJob(jobId: string): Promise<void> {
       current_phase: "Research complete",
       current_agent: "",
       completed_sections: completed,
-      error_message: failed > 0 && failed < sections.length ? `${failed} section(s) failed` : failed === sections.length ? "All sections failed" : null,
+      error_message:
+        failed > 0 && failed < sections.length
+          ? `${failed} section(s) failed`
+          : failed === sections.length
+          ? "All sections failed"
+          : null,
     })
     .eq("id", jobId);
 
-  await logAgent(jobId, "Orchestrator", "Job complete", `${completed}/${sections.length} sections succeeded`, "done");
+  await log(jobId, "Orchestrator", "status", "Job complete", `${completed}/${sections.length} sections succeeded`, { completed, failed }, "done");
 }
