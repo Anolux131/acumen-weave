@@ -226,7 +226,7 @@ function ResearchProgress() {
 
         {/* Main pane */}
         <div className="space-y-6">
-          <Tabs defaultValue={isDone ? "section" : "researcher"}>
+          <Tabs defaultValue={isDone ? "report" : "researcher"}>
             <TabsList className="bg-surface">
               <TabsTrigger value="researcher">
                 <Brain className="mr-1.5 h-3.5 w-3.5" />
@@ -236,6 +236,24 @@ function ResearchProgress() {
                 )}
               </TabsTrigger>
               <TabsTrigger value="section">Section</TabsTrigger>
+              <TabsTrigger value="report">
+                <FileText className="mr-1.5 h-3.5 w-3.5" />
+                Report
+                {reports.length > 0 && (
+                  <span className="ml-2 font-mono text-[10px] text-muted-foreground">
+                    {reports.length}
+                  </span>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="contacts">
+                <Users className="mr-1.5 h-3.5 w-3.5" />
+                Contacts
+                {contacts.length > 0 && (
+                  <span className="ml-2 font-mono text-[10px] text-muted-foreground">
+                    {contacts.length}
+                  </span>
+                )}
+              </TabsTrigger>
               <TabsTrigger value="terminal">
                 Log
                 <span className="ml-2 font-mono text-[10px] text-muted-foreground">
@@ -250,6 +268,14 @@ function ResearchProgress() {
 
             <TabsContent value="section" className="mt-4">
               <SectionPane row={activeSection} sectionNumber={active} />
+            </TabsContent>
+
+            <TabsContent value="report" className="mt-4">
+              <ReportPane reports={reports} isDone={isDone} companyName={job?.company_name ?? ""} />
+            </TabsContent>
+
+            <TabsContent value="contacts" className="mt-4">
+              <ContactsPane contacts={contacts} isDone={isDone} />
             </TabsContent>
 
             <TabsContent value="terminal" className="mt-4">
