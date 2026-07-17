@@ -18,14 +18,25 @@ import {
   Search,
   Globe,
   FileDown,
+  FileText,
+  Users,
+  Copy,
+  Download,
+  Mail,
+  Linkedin,
+  Star,
 } from "lucide-react";
 import { SECTIONS, ACTIVE_SECTION_NUMBERS } from "@/lib/section-config";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 
 type Job = Database["public"]["Tables"]["research_jobs"]["Row"];
 type SectionRow = Database["public"]["Tables"]["section_results"]["Row"];
 type LogRow = Database["public"]["Tables"]["agent_logs"]["Row"];
+type ReportRow = Database["public"]["Tables"]["reports"]["Row"];
+type ContactRow = Database["public"]["Tables"]["contacts"]["Row"];
 
 export const Route = createFileRoute("/_authenticated/research/$id")({
   component: ResearchProgress,
@@ -36,6 +47,8 @@ function ResearchProgress() {
   const [job, setJob] = useState<Job | null>(null);
   const [sections, setSections] = useState<SectionRow[]>([]);
   const [logs, setLogs] = useState<LogRow[]>([]);
+  const [reports, setReports] = useState<ReportRow[]>([]);
+  const [contacts, setContacts] = useState<ContactRow[]>([]);
   const [active, setActive] = useState<number>(ACTIVE_SECTION_NUMBERS[0]);
 
   useEffect(() => {
