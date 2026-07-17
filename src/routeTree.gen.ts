@@ -10,33 +10,43 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiPublicOrchestrateRouteImport } from './routes/api/public/orchestrate'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicOrchestrateRoute = ApiPublicOrchestrateRouteImport.update({
+  id: '/api/public/orchestrate',
+  path: '/api/public/orchestrate',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/api/public/orchestrate': typeof ApiPublicOrchestrateRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/api/public/orchestrate': typeof ApiPublicOrchestrateRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/api/public/orchestrate': typeof ApiPublicOrchestrateRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths: '/' | '/api/public/orchestrate'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to: '/' | '/api/public/orchestrate'
+  id: '__root__' | '/' | '/api/public/orchestrate'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ApiPublicOrchestrateRoute: typeof ApiPublicOrchestrateRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -48,11 +58,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/orchestrate': {
+      id: '/api/public/orchestrate'
+      path: '/api/public/orchestrate'
+      fullPath: '/api/public/orchestrate'
+      preLoaderRoute: typeof ApiPublicOrchestrateRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ApiPublicOrchestrateRoute: ApiPublicOrchestrateRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
