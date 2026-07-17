@@ -139,7 +139,7 @@ function StatCard({
 }
 
 function JobRow({ job }: { job: Job }) {
-  const isRunning = job.status === "researching" || job.status === "planning" || job.status === "analyzing";
+  const isRunning = job.status === "researching" || job.status === "planning";
   const StatusIcon =
     job.status === "complete"
       ? CheckCircle2
