@@ -54,15 +54,19 @@ function ResearchProgress() {
   useEffect(() => {
     let mounted = true;
     async function loadAll() {
-      const [j, s, l] = await Promise.all([
+      const [j, s, l, r, c] = await Promise.all([
         supabase.from("research_jobs").select("*").eq("id", id).maybeSingle(),
         supabase.from("section_results").select("*").eq("job_id", id).order("section_number"),
         supabase.from("agent_logs").select("*").eq("job_id", id).order("created_at").limit(1500),
+        supabase.from("reports").select("*").eq("job_id", id).order("created_at", { ascending: false }),
+        supabase.from("contacts").select("*").eq("job_id", id).order("outreach_priority"),
       ]);
       if (!mounted) return;
       setJob(j.data);
       setSections(s.data ?? []);
       setLogs(l.data ?? []);
+      setReports(r.data ?? []);
+      setContacts(c.data ?? []);
     }
     loadAll();
 
@@ -89,6 +93,16 @@ function ResearchProgress() {
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "agent_logs", filter: `job_id=eq.${id}` },
         (payload) => setLogs((prev) => [...prev, payload.new as LogRow]),
+      )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "reports", filter: `job_id=eq.${id}` },
+        (payload) => setReports((prev) => [payload.new as ReportRow, ...prev]),
+      )
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "contacts", filter: `job_id=eq.${id}` },
+        (payload) => setContacts((prev) => [...prev, payload.new as ContactRow]),
       )
       .subscribe();
 
