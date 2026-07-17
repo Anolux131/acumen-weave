@@ -50,17 +50,25 @@ export const createResearchJob = createServerFn({ method: "POST" })
     });
     await supabase.from("section_results").insert(sectionRows);
 
-    // Fire-and-forget: trigger the background orchestrator without awaiting.
-    // We import server-only code inside the handler so it never leaks to the client bundle.
-    const { runResearchJob } = await import("./research-agent.server");
-    // Intentionally do NOT await — Cloudflare Workers will keep the promise alive
-    // as long as the response hasn't been finalized. To be safe we use a detached
-    // promise wrapped in a try/catch so any rejection is logged, not thrown.
-    Promise.resolve().then(() =>
-      runResearchJob(job.id).catch((err) => {
-        console.error(`[orchestrator] Job ${job.id} crashed:`, err);
-      }),
-    );
+    // Fire-and-forget: POST to our own public route so the orchestrator runs
+    // in a fresh Worker invocation that outlives this request.
+    const origin = new URL(process.env.SUPABASE_URL ?? "https://localhost").origin;
+    // Rebuild origin from the incoming request instead — the Supabase URL is
+    // not the app's URL. Use the request headers.
+    const { getRequest } = await import("@tanstack/react-start/server");
+    const req = getRequest();
+    const appOrigin = new URL(req.url).origin;
+    const token = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+
+    // Do NOT await — kick off the HTTP request and return immediately.
+    void fetch(`${appOrigin}/api/public/orchestrate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ job_id: job.id, token }),
+    }).catch((err) => console.error("[research.functions] orchestrator kick failed:", err));
+
+    // Silence unused-var lint for origin (kept as a defensive fallback pattern)
+    void origin;
 
     return { job_id: job.id };
   });
