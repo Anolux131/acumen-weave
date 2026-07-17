@@ -92,23 +92,27 @@ function NewResearch() {
 
             <div className="rounded-lg border border-border bg-surface p-4">
               <div className="flex items-center gap-2 text-xs font-mono uppercase tracking-widest text-primary">
-                <Sparkles className="h-3.5 w-3.5" /> This run will produce
+                <Sparkles className="h-3.5 w-3.5" /> Full-spectrum intelligence run
               </div>
-              <ul className="mt-3 grid gap-2 text-sm text-muted-foreground sm:grid-cols-2">
-                <li>• Executive Intelligence</li>
-                <li>• Market Position</li>
-                <li>• Customer Intelligence</li>
-                <li>• Website Intelligence</li>
-                <li>• AI Visibility (GEO)</li>
-                <li>• Search Intelligence (SEO)</li>
-                <li>• Messaging Intelligence</li>
-                <li>• Content Intelligence</li>
-                <li>• Funnel Intelligence</li>
-                <li>• Product Intelligence</li>
+              <ul className="mt-3 grid gap-1.5 text-sm text-muted-foreground sm:grid-cols-2">
+                <li>1. Executive Intelligence</li>
+                <li>2. Market Position</li>
+                <li>3. Customer Intelligence</li>
+                <li>4. Website Intelligence</li>
+                <li>5. AI Visibility (GEO)</li>
+                <li>6. Search Intelligence (SEO)</li>
+                <li>7. Messaging Intelligence</li>
+                <li>8. Content Intelligence</li>
+                <li>9. Funnel Intelligence</li>
+                <li>10. Product Intelligence</li>
+                <li>11. Trust Intelligence</li>
+                <li>12. Revenue Intelligence</li>
+                <li>13. Opportunity Intelligence</li>
+                <li className="text-primary">14. Executive Recommendations</li>
               </ul>
               <p className="mt-3 text-[11px] text-muted-foreground/70">
-                Phase 3 — 10 of 14 sections active. Watch the Deep Researcher stream live.
-                Estimated runtime: 2–4 minutes.
+                All 14 sections + Hunter.io buying-committee contacts + downloadable
+                Executive Brief and Full Dossier. Estimated runtime: 3–6 minutes.
               </p>
             </div>
 
