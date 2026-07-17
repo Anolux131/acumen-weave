@@ -10,12 +10,21 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AuthRouteImport } from './routes/auth'
+import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuthenticatedSettingsRouteImport } from './routes/_authenticated/settings'
+import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
 import { Route as ApiPublicOrchestrateRouteImport } from './routes/api/public/orchestrate'
+import { Route as AuthenticatedResearchNewRouteImport } from './routes/_authenticated/research/new'
+import { Route as AuthenticatedResearchIdRouteImport } from './routes/_authenticated/research/$id'
 
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
   path: '/auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuthenticatedRouteRoute = AuthenticatedRouteRouteImport.update({
+  id: '/_authenticated',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -23,38 +32,96 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthenticatedSettingsRoute = AuthenticatedSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 const ApiPublicOrchestrateRoute = ApiPublicOrchestrateRouteImport.update({
   id: '/api/public/orchestrate',
   path: '/api/public/orchestrate',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthenticatedResearchNewRoute =
+  AuthenticatedResearchNewRouteImport.update({
+    id: '/research/new',
+    path: '/research/new',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedResearchIdRoute = AuthenticatedResearchIdRouteImport.update({
+  id: '/research/$id',
+  path: '/research/$id',
+  getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/dashboard': typeof AuthenticatedDashboardRoute
+  '/settings': typeof AuthenticatedSettingsRoute
+  '/research/$id': typeof AuthenticatedResearchIdRoute
+  '/research/new': typeof AuthenticatedResearchNewRoute
   '/api/public/orchestrate': typeof ApiPublicOrchestrateRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/dashboard': typeof AuthenticatedDashboardRoute
+  '/settings': typeof AuthenticatedSettingsRoute
+  '/research/$id': typeof AuthenticatedResearchIdRoute
+  '/research/new': typeof AuthenticatedResearchNewRoute
   '/api/public/orchestrate': typeof ApiPublicOrchestrateRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
+  '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
+  '/_authenticated/settings': typeof AuthenticatedSettingsRoute
+  '/_authenticated/research/$id': typeof AuthenticatedResearchIdRoute
+  '/_authenticated/research/new': typeof AuthenticatedResearchNewRoute
   '/api/public/orchestrate': typeof ApiPublicOrchestrateRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/auth' | '/api/public/orchestrate'
+  fullPaths:
+    | '/'
+    | '/auth'
+    | '/dashboard'
+    | '/settings'
+    | '/research/$id'
+    | '/research/new'
+    | '/api/public/orchestrate'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/auth' | '/api/public/orchestrate'
-  id: '__root__' | '/' | '/auth' | '/api/public/orchestrate'
+  to:
+    | '/'
+    | '/auth'
+    | '/dashboard'
+    | '/settings'
+    | '/research/$id'
+    | '/research/new'
+    | '/api/public/orchestrate'
+  id:
+    | '__root__'
+    | '/'
+    | '/_authenticated'
+    | '/auth'
+    | '/_authenticated/dashboard'
+    | '/_authenticated/settings'
+    | '/_authenticated/research/$id'
+    | '/_authenticated/research/new'
+    | '/api/public/orchestrate'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
   ApiPublicOrchestrateRoute: typeof ApiPublicOrchestrateRoute
 }
@@ -68,12 +135,33 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authenticated': {
+      id: '/_authenticated'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AuthenticatedRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated/settings': {
+      id: '/_authenticated/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof AuthenticatedSettingsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/dashboard': {
+      id: '/_authenticated/dashboard'
+      path: '/dashboard'
+      fullPath: '/dashboard'
+      preLoaderRoute: typeof AuthenticatedDashboardRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
     }
     '/api/public/orchestrate': {
       id: '/api/public/orchestrate'
@@ -82,11 +170,43 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicOrchestrateRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_authenticated/research/new': {
+      id: '/_authenticated/research/new'
+      path: '/research/new'
+      fullPath: '/research/new'
+      preLoaderRoute: typeof AuthenticatedResearchNewRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/research/$id': {
+      id: '/_authenticated/research/$id'
+      path: '/research/$id'
+      fullPath: '/research/$id'
+      preLoaderRoute: typeof AuthenticatedResearchIdRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
   }
 }
 
+interface AuthenticatedRouteRouteChildren {
+  AuthenticatedDashboardRoute: typeof AuthenticatedDashboardRoute
+  AuthenticatedSettingsRoute: typeof AuthenticatedSettingsRoute
+  AuthenticatedResearchIdRoute: typeof AuthenticatedResearchIdRoute
+  AuthenticatedResearchNewRoute: typeof AuthenticatedResearchNewRoute
+}
+
+const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
+  AuthenticatedDashboardRoute: AuthenticatedDashboardRoute,
+  AuthenticatedSettingsRoute: AuthenticatedSettingsRoute,
+  AuthenticatedResearchIdRoute: AuthenticatedResearchIdRoute,
+  AuthenticatedResearchNewRoute: AuthenticatedResearchNewRoute,
+}
+
+const AuthenticatedRouteRouteWithChildren =
+  AuthenticatedRouteRoute._addFileChildren(AuthenticatedRouteRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
   ApiPublicOrchestrateRoute: ApiPublicOrchestrateRoute,
 }
