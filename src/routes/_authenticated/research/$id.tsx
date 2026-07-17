@@ -695,3 +695,226 @@ function SectionPane({ row, sectionNumber }: { row: SectionRow | undefined; sect
     </div>
   );
 }
+
+/* -------------------------------------------------------------------------- */
+/*                                Report Pane                                  */
+/* -------------------------------------------------------------------------- */
+
+function ReportPane({
+  reports,
+  isDone,
+  companyName,
+}: {
+  reports: ReportRow[];
+  isDone: boolean;
+  companyName: string;
+}) {
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const active = reports.find((r) => r.id === activeId) ?? reports[0];
+
+  if (reports.length === 0) {
+    return (
+      <Card className="border-border bg-panel/60 p-10 text-center">
+        {isDone ? (
+          <>
+            <FileText className="mx-auto h-8 w-8 text-muted-foreground/50" />
+            <p className="mt-3 text-sm font-medium">No report generated</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              All sections may have failed. Check the log tab.
+            </p>
+          </>
+        ) : (
+          <>
+            <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" />
+            <p className="mt-3 text-sm font-medium text-primary">Compiling dossier…</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Executive brief and full dossier appear here once research completes.
+            </p>
+          </>
+        )}
+      </Card>
+    );
+  }
+
+  const copyMarkdown = async () => {
+    if (!active?.markdown_content) return;
+    await navigator.clipboard.writeText(active.markdown_content);
+    toast.success("Markdown copied to clipboard");
+  };
+
+  const download = () => {
+    if (!active?.markdown_content) return;
+    const blob = new Blob([active.markdown_content], { type: "text/markdown" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${companyName.toLowerCase().replace(/\s+/g, "-")}-${active.report_type}.md`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap gap-2">
+          {reports.map((r) => (
+            <button
+              key={r.id}
+              onClick={() => setActiveId(r.id)}
+              className={`rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
+                active?.id === r.id
+                  ? "border-primary/60 bg-surface text-foreground"
+                  : "border-border bg-panel/40 text-muted-foreground hover:bg-surface"
+              }`}
+            >
+              {r.report_type === "executive_brief" ? "Executive Brief" : "Full Dossier"}
+              <span className="ml-2 font-mono text-[10px] text-muted-foreground">
+                {r.page_count}p
+              </span>
+            </button>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={copyMarkdown}>
+            <Copy className="mr-1.5 h-3.5 w-3.5" /> Copy MD
+          </Button>
+          <Button variant="outline" size="sm" onClick={download}>
+            <Download className="mr-1.5 h-3.5 w-3.5" /> Download
+          </Button>
+        </div>
+      </div>
+
+      <Card className="border-border bg-panel/70 p-8">
+        <article className="prose prose-invert prose-sm max-w-none prose-headings:font-semibold prose-h1:text-3xl prose-h1:text-gradient prose-h2:mt-6 prose-h2:text-lg prose-strong:text-foreground prose-table:text-xs">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            {active?.markdown_content ?? ""}
+          </ReactMarkdown>
+        </article>
+      </Card>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*                               Contacts Pane                                 */
+/* -------------------------------------------------------------------------- */
+
+function ContactsPane({ contacts, isDone }: { contacts: ContactRow[]; isDone: boolean }) {
+  if (contacts.length === 0) {
+    return (
+      <Card className="border-border bg-panel/60 p-10 text-center">
+        {isDone ? (
+          <>
+            <Users className="mx-auto h-8 w-8 text-muted-foreground/50" />
+            <p className="mt-3 text-sm font-medium">No contacts discovered</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Hunter.io returned no emails for this domain, or no company URL was provided.
+            </p>
+          </>
+        ) : (
+          <>
+            <Loader2 className="mx-auto h-8 w-8 animate-spin text-primary" />
+            <p className="mt-3 text-sm font-medium text-primary">Enriching contacts…</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Buying-committee contacts appear here once research completes.
+            </p>
+          </>
+        )}
+      </Card>
+    );
+  }
+
+  const priorityRank = { high: 0, medium: 1, low: 2 } as const;
+  const sorted = [...contacts].sort(
+    (a, b) =>
+      (priorityRank[a.outreach_priority ?? "low"] ?? 3) -
+      (priorityRank[b.outreach_priority ?? "low"] ?? 3),
+  );
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-4 rounded-md border border-border bg-panel/50 px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+        <span>{contacts.length} contacts</span>
+        <span>
+          <span className="text-success">{contacts.filter((c) => c.outreach_priority === "high").length}</span>{" "}
+          high priority
+        </span>
+        <span>{contacts.filter((c) => c.email).length} with email</span>
+      </div>
+
+      <div className="grid gap-2">
+        {sorted.map((c) => (
+          <Card
+            key={c.id}
+            className="border-border bg-panel/60 p-4 transition-colors hover:border-primary/40"
+          >
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-surface text-sm font-medium text-primary">
+                {(c.full_name ?? c.email ?? "?").slice(0, 2).toUpperCase()}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="truncate text-sm font-semibold">
+                    {c.full_name || "(name unavailable)"}
+                  </p>
+                  {c.outreach_priority && (
+                    <PriorityBadge priority={c.outreach_priority} />
+                  )}
+                  {c.buying_role && (
+                    <Badge variant="outline" className="font-mono text-[9px] uppercase">
+                      {c.buying_role.replace(/_/g, " ")}
+                    </Badge>
+                  )}
+                </div>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {c.job_title ?? c.seniority_level ?? "—"}
+                  {c.department ? ` • ${c.department}` : ""}
+                </p>
+                <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
+                  {c.email && (
+                    <a
+                      href={`mailto:${c.email}`}
+                      className="inline-flex items-center gap-1 text-primary hover:underline"
+                    >
+                      <Mail className="h-3 w-3" />
+                      {c.email}
+                    </a>
+                  )}
+                  {c.email_confidence != null && (
+                    <span className="font-mono text-[10px] text-muted-foreground">
+                      confidence {c.email_confidence}%
+                    </span>
+                  )}
+                  {c.linkedin_url && (
+                    <a
+                      href={c.linkedin_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+                    >
+                      <Linkedin className="h-3 w-3" /> LinkedIn
+                    </a>
+                  )}
+                </div>
+              </div>
+            </div>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PriorityBadge({ priority }: { priority: "high" | "medium" | "low" }) {
+  const cfg = {
+    high: { label: "High", cls: "bg-success/15 text-success border-success/30" },
+    medium: { label: "Medium", cls: "bg-primary/15 text-primary border-primary/30" },
+    low: { label: "Low", cls: "bg-muted/30 text-muted-foreground border-border" },
+  }[priority];
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider ${cfg.cls}`}
+    >
+      <Star className="h-2.5 w-2.5" /> {cfg.label}
+    </span>
+  );
+}
