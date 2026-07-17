@@ -95,13 +95,20 @@ function NewResearch() {
                 <Sparkles className="h-3.5 w-3.5" /> This run will produce
               </div>
               <ul className="mt-3 grid gap-2 text-sm text-muted-foreground sm:grid-cols-2">
-                <li>• Executive Intelligence (funding, leadership)</li>
-                <li>• Market Position (competitors, category)</li>
-                <li>• Customer Intelligence (reviews, sentiment)</li>
-                <li>• Website Intelligence (UX, conversion, SEO)</li>
+                <li>• Executive Intelligence</li>
+                <li>• Market Position</li>
+                <li>• Customer Intelligence</li>
+                <li>• Website Intelligence</li>
+                <li>• AI Visibility (GEO)</li>
+                <li>• Search Intelligence (SEO)</li>
+                <li>• Messaging Intelligence</li>
+                <li>• Content Intelligence</li>
+                <li>• Funnel Intelligence</li>
+                <li>• Product Intelligence</li>
               </ul>
               <p className="mt-3 text-[11px] text-muted-foreground/70">
-                Phase 2 — 4 of 14 sections active. Estimated runtime: 60–120 seconds.
+                Phase 3 — 10 of 14 sections active. Watch the Deep Researcher stream live.
+                Estimated runtime: 2–4 minutes.
               </p>
             </div>
 
