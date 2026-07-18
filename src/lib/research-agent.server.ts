@@ -271,8 +271,8 @@ ${scrapedContent}
 Analyze the above data and produce Section ${section.number}: ${section.name}. Follow the required output structure exactly.`;
 
     // 4. Streamed analysis
-    await log(opts.jobId, agent, "status", `Synthesizing with ${ANALYSIS_MODEL}`);
-    const { text: analyzed, tokens } = await analyzeStreamed(opts.jobId, agent, section.systemPrompt, userContext);
+    await log(opts.jobId, agent, "status", `Synthesizing with ${opts.provider.provider}:${opts.provider.model}`);
+    const { text: analyzed, tokens } = await analyzeStreamed(opts.jobId, agent, section.systemPrompt, userContext, opts.provider);
     const confidence = extractConfidence(analyzed);
     const findings = extractKeyFindings(analyzed);
 
