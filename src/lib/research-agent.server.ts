@@ -4,6 +4,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { getSection, ACTIVE_SECTION_NUMBERS } from "./section-config";
+import { resolveProvider, type ProviderConfig } from "./ai-provider.server";
 
 type TavilyResult = { url: string; title: string; content: string; score?: number };
 type ScrapeResult = { url: string; markdown: string; error?: string };
@@ -11,8 +12,6 @@ type LogKind = "status" | "query" | "source" | "scrape" | "thought";
 
 const TAVILY_URL = "https://api.tavily.com/search";
 const FIRECRAWL_URL = "https://api.firecrawl.dev/v1/scrape";
-const LOVABLE_AI_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
-const ANALYSIS_MODEL = "google/gemini-2.5-flash";
 
 function admin() {
   return createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
