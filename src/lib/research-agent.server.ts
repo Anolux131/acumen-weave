@@ -92,17 +92,13 @@ async function analyzeStreamed(
   agent: string,
   systemPrompt: string,
   userContext: string,
+  provider: ProviderConfig,
 ): Promise<{ text: string; tokens: number }> {
-  const key = process.env.LOVABLE_API_KEY;
-  if (!key) throw new Error("LOVABLE_API_KEY missing");
-  const res = await fetch(LOVABLE_AI_URL, {
+  const res = await fetch(provider.endpoint, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Lovable-API-Key": key,
-    },
+    headers: provider.headers,
     body: JSON.stringify({
-      model: ANALYSIS_MODEL,
+      model: provider.model,
       stream: true,
       messages: [
         { role: "system", content: systemPrompt },
@@ -112,7 +108,7 @@ async function analyzeStreamed(
   });
   if (!res.ok || !res.body) {
     const body = await res.text().catch(() => "");
-    throw new Error(`Lovable AI ${res.status}: ${body.slice(0, 400)}`);
+    throw new Error(`${provider.provider} ${res.status}: ${body.slice(0, 400)}`);
   }
 
   const reader = res.body.getReader();
