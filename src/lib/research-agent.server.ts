@@ -562,6 +562,18 @@ export async function runResearchJob(jobId: string): Promise<void> {
   const researchSections = allSections.filter((n) => !getSection(n).synthesis);
   const synthesisSections = allSections.filter((n) => getSection(n).synthesis);
 
+  // Resolve AI provider (BYO keys + model selection) once per job.
+  let provider: ProviderConfig;
+  try {
+    provider = await resolveProvider(job.user_id);
+    await log(jobId, "Orchestrator", "status", "AI provider connected", `${provider.provider} • ${provider.model}`, { provider: provider.provider, model: provider.model }, "done");
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    await db.from("research_jobs").update({ status: "failed", current_phase: "AI provider error", error_message: msg }).eq("id", jobId);
+    await log(jobId, "Orchestrator", "status", "AI provider not available", msg, { error: msg }, "error");
+    throw e;
+  }
+
   await db
     .from("research_jobs")
     .update({
@@ -586,6 +598,7 @@ export async function runResearchJob(jobId: string): Promise<void> {
           companyName: job.company_name,
           companyUrl: job.company_url ?? undefined,
           industry: job.industry ?? undefined,
+          provider,
         }),
       ),
     );
@@ -594,7 +607,7 @@ export async function runResearchJob(jobId: string): Promise<void> {
   // Wave 2: synthesis (14)
   await db.from("research_jobs").update({ current_phase: "Synthesizing", progress_percentage: 92 }).eq("id", jobId);
   for (const n of synthesisSections) {
-    await runSynthesisSection({ jobId, userId: job.user_id, sectionNumber: n, companyName: job.company_name });
+    await runSynthesisSection({ jobId, userId: job.user_id, sectionNumber: n, companyName: job.company_name, provider });
   }
 
   // Wave 3: contacts + report — run in parallel
