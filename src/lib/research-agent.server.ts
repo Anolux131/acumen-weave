@@ -347,7 +347,7 @@ export async function runSynthesisSection(opts: {
     const userContext = `Target company: ${opts.companyName}\n\n${context}\n\nProduce the Executive Recommendations brief exactly as specified.`;
 
     await log(opts.jobId, agent, "status", `Synthesizing across ${priors.length} sections`);
-    const { text, tokens } = await analyzeStreamed(opts.jobId, agent, section.systemPrompt, userContext);
+    const { text, tokens } = await analyzeStreamed(opts.jobId, agent, section.systemPrompt, userContext, opts.provider);
     const confidence = extractConfidence(text);
     const findings = extractKeyFindings(text);
 
