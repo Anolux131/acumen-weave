@@ -752,6 +752,21 @@ function ReportPane({
     URL.revokeObjectURL(a.href);
   };
 
+  const downloadPdf = async () => {
+    if (!active?.markdown_content) return;
+    const { downloadReportAsPdf } = await import("@/lib/pdf-report");
+    downloadReportAsPdf({
+      markdown: active.markdown_content,
+      title: active.title || `${companyName} — Intelligence Report`,
+      subtitle:
+        active.report_type === "executive_brief"
+          ? "Executive Brief"
+          : "Full Intelligence Dossier",
+      filename: `${companyName.toLowerCase().replace(/\s+/g, "-")}-${active.report_type}.pdf`,
+    });
+    toast.success("PDF generated");
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -778,7 +793,10 @@ function ReportPane({
             <Copy className="mr-1.5 h-3.5 w-3.5" /> Copy MD
           </Button>
           <Button variant="outline" size="sm" onClick={download}>
-            <Download className="mr-1.5 h-3.5 w-3.5" /> Download
+            <Download className="mr-1.5 h-3.5 w-3.5" /> .md
+          </Button>
+          <Button size="sm" onClick={downloadPdf}>
+            <Download className="mr-1.5 h-3.5 w-3.5" /> Download PDF
           </Button>
         </div>
       </div>
