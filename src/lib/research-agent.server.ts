@@ -317,6 +317,7 @@ export async function runSynthesisSection(opts: {
   userId: string;
   sectionNumber: number;
   companyName: string;
+  provider: ProviderConfig;
 }): Promise<void> {
   const t0 = Date.now();
   const db = admin();
