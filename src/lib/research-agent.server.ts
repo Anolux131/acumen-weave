@@ -186,6 +186,7 @@ export async function runSection(opts: {
   companyName: string;
   companyUrl?: string;
   industry?: string;
+  provider: ProviderConfig;
 }): Promise<void> {
   const t0 = Date.now();
   const db = admin();
