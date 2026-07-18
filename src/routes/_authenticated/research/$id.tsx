@@ -7,25 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import {
-  ArrowLeft,
-  CheckCircle2,
-  XCircle,
-  Loader2,
-  Clock,
-  Radar,
-  Brain,
-  Search,
-  Globe,
-  FileDown,
-  FileText,
-  Users,
-  Copy,
-  Download,
-  Mail,
-  Linkedin,
-  Star,
-} from "lucide-react";
+import { ArrowLeft, CircleCheck as CheckCircle2, Circle as XCircle, Loader as Loader2, Clock, Radar, Brain, Search, Globe, FileText, Users, Copy, Download, Mail, Linkedin, Star, FastForward, Activity } from "lucide-react";
 import { SECTIONS, ACTIVE_SECTION_NUMBERS } from "@/lib/section-config";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -263,7 +245,7 @@ function ResearchProgress() {
             </TabsList>
 
             <TabsContent value="researcher" className="mt-4">
-              <DeepResearcher logs={logs} activeSection={active} isDone={isDone} />
+              <DeepResearcher activeSection={active} isDone={isDone} />
             </TabsContent>
 
             <TabsContent value="section" className="mt-4">
@@ -292,65 +274,245 @@ function ResearchProgress() {
 /*                            Deep Researcher panel                            */
 /* -------------------------------------------------------------------------- */
 
-type SourceMeta = { url?: string; title?: string; snippet?: string; score?: number; query?: string };
-type QueryMeta = { query?: string };
-type ScrapeMeta = { url?: string; chars?: number; error?: string };
+type BatchPayload = {
+  thoughts: string[];
+  queries: string[];
+  sources: { domain: string; title: string; url: string; score: number }[];
+};
+
+// Mock multi-batch execution telemetry. Batches 7-10 are intentionally empty
+// to exercise the loading-skeleton path for pending iterations.
+const MOCK_BATCHES: BatchPayload[] = [
+  {
+    thoughts: [
+      "**Batch 1 — Planning.** Decomposing the executive intelligence brief. Priority axes: funding history, leadership chain, ARR signals, and 12-month news delta.",
+      "Mapping known anchors: Crunchbase + PitchBook for funding rounds, LinkedIn for leadership, and recent press indexes for strategic direction deltas.",
+      "Confidence calibration: funding and leadership are HIGH evidence; ARR is MEDIUM (rarely disclosed) — will triangulate via headcount growth and pricing tiers.",
+    ],
+    queries: [
+      "Acme Corp funding round Series A B C",
+      "Acme Corp CEO founder leadership team",
+      "Acme Corp ARR revenue growth 2025",
+      "Acme Corp crunchbase profile valuation",
+    ],
+    sources: [
+      { domain: "crunchbase.com", title: "Acme Corp — Funding, Valuation & Investors", url: "https://www.crunchbase.com/organization/acme-corp", score: 0.98 },
+      { domain: "pitchbook.com", title: "Acme Corp Company Profile | PitchBook", url: "https://pitchbook.com/profiles/acme-corp", score: 0.94 },
+      { domain: "linkedin.com", title: "Acme Corp | Leadership & Employees", url: "https://www.linkedin.com/company/acme-corp", score: 0.91 },
+      { domain: "techcrunch.com", title: "Acme Corp raises $42M Series B to expand go-to-market", url: "https://techcrunch.com/2025/03/acme-series-b", score: 0.88 },
+    ],
+  },
+  {
+    thoughts: [
+      "**Batch 2 — Funding triangulation.** Series B confirmed ($42M, Mar 2025, led by Sequoia). Cross-referencing prior rounds: Seed $3.1M (2021), Series A $11M (2023).",
+      "Cumulative raised: ~$56M. Implied post-money at B: ~$210M. Burn rate inference: 18-month runway at current headcount (94 employees per LinkedIn).",
+      "Strategic direction delta: press release language shifted from 'platform' to 'infrastructure' framing — signals category repositioning post-Series B.",
+    ],
+    queries: [
+      "Acme Corp Sequoia Series B lead investor",
+      "Acme Corp seed funding history 2021",
+      "Acme Corp post-money valuation 210M",
+      "Acme Corp headcount 94 employees LinkedIn",
+    ],
+    sources: [
+      { domain: "sequoiacap.com", title: "Our Investment in Acme Corp", url: "https://www.sequoiacap.com/posts/acme-corp", score: 0.96 },
+      { domain: "bloomberg.com", title: "Acme Corp Valuation Reaches $210 Million in Series B", url: "https://www.bloomberg.com/news/acme-series-b", score: 0.93 },
+      { domain: "angel.co", title: "Acme Corp — Seed Round (2021)", url: "https://angel.co/company/acme-corp/seed", score: 0.82 },
+      { domain: "growjo.com", title: "Acme Corp Employee Count & Revenue", url: "https://growjo.com/company/acme-corp", score: 0.76 },
+    ],
+  },
+  {
+    thoughts: [
+      "**Batch 3 — Leadership chain.** Founder/CEO: Sarah Chen (ex-Stripe PM). Co-founder/CTO: Marcus Vega (ex-Databricks). Recent hire: VP Sales from Gong (Q1 2025) — indicates sales-led motion intensifying.",
+      "Board composition: 5 seats — 2 founder, 2 investor (Sequoia, a16z), 1 independent (former CFO of Snowflake). Strong governance signal for Series C readiness.",
+      "Hiring velocity: 28 open roles, 22 in go-to-market vs 6 in engineering. Confirms the sales-led pivot inferred from the VP Sales hire.",
+    ],
+    queries: [
+      "Sarah Chen Acme Corp CEO ex-Stripe",
+      "Marcus Vega Acme Corp CTO Databricks",
+      "Acme Corp VP Sales Gong hire 2025",
+      "Acme Corp board of directors composition",
+      "Acme Corp open roles hiring 2025",
+    ],
+    sources: [
+      { domain: "linkedin.com", title: "Sarah Chen — CEO at Acme Corp", url: "https://www.linkedin.com/in/sarah-chen-acme", score: 0.95 },
+      { domain: "linkedin.com", title: "Marcus Vega — CTO at Acme Corp", url: "https://www.linkedin.com/in/marcus-vega-acme", score: 0.92 },
+      { domain: "github.com", title: "marcusvega (Marcus Vega) · GitHub", url: "https://github.com/marcusvega", score: 0.78 },
+      { domain: "acme.com", title: "Open Roles — Acme Corp Careers", url: "https://www.acme.com/careers", score: 0.89 },
+    ],
+  },
+  {
+    thoughts: [
+      "**Batch 4 — Revenue signals.** No disclosed ARR. Triangulating: 94 employees × $180K avg SaaS revenue/employee ≈ $17M ARR (ballpark, MEDIUM confidence).",
+      "Pricing page indicates 3 tiers: Starter ($49/mo), Growth ($499/mo), Enterprise (custom). Bottom-up PLG signature with sales-assist at Growth+ tier.",
+      "Customer count inference from case studies: ~340 named accounts. Blended ACV ~$50K → supports ~$17M ARR estimate within 20% margin.",
+    ],
+    queries: [
+      "Acme Corp pricing tiers Starter Growth Enterprise",
+      "Acme Corp customer count case studies",
+      "Acme Corp annual contract value ACV",
+      "Acme Corp ARR estimate 17M",
+    ],
+    sources: [
+      { domain: "acme.com", title: "Pricing — Acme Corp", url: "https://www.acme.com/pricing", score: 0.99 },
+      { domain: "g2.com", title: "Acme Corp Reviews & Pricing 2025", url: "https://www.g2.com/products/acme-corp/pricing", score: 0.9 },
+      { domain: "capterra.com", title: "Acme Corp Pricing, Features & Reviews", url: "https://www.capterra.com/p/acme-corp", score: 0.85 },
+      { domain: "acme.com", title: "Customer Stories — Acme Corp", url: "https://www.acme.com/customers", score: 0.87 },
+    ],
+  },
+  {
+    thoughts: [
+      "**Batch 5 — Strategic direction & news delta.** Three notable press events in last 12 months: (1) Series B close Mar 2025, (2) AI agent product launch Jul 2025, (3) EU expansion announcement Oct 2025.",
+      "The AI agent launch is the strongest strategic signal — pivots the company from workflow automation toward agentic orchestration, a more defensible category.",
+      "EU expansion implies localization + compliance investment (GDPR-heavy). Watch for DPO hire and ISO 27001 certification as precursors to enterprise EU deals.",
+    ],
+    queries: [
+      "Acme Corp AI agent launch July 2025",
+      "Acme Corp EU expansion Europe 2025",
+      "Acme Corp product roadmap agentic orchestration",
+      "Acme Corp GDPR ISO 27001 compliance",
+    ],
+    sources: [
+      { domain: "acme.com", title: "Introducing Acme Agents — Autonomous Workflows", url: "https://www.acme.com/blog/acme-agents-launch", score: 0.97 },
+      { domain: "venturebeat.com", title: "Acme Corp launches AI agents for enterprise workflows", url: "https://venturebeat.com/2025/07/acme-agents", score: 0.9 },
+      { domain: "acme.com", title: "Acme Corp Expands to EMEA Region", url: "https://www.acme.com/press/emea-expansion", score: 0.93 },
+      { domain: "sifted.eu", title: "Acme Corp opens Berlin office targeting DACH market", url: "https://sifted.eu/articles/acme-corp-berlin", score: 0.84 },
+    ],
+  },
+  {
+    thoughts: [
+      "**Batch 6 — Synthesis & calibration.** Executive picture is converging: well-funded ($56M cum), strong leadership (ex-Stripe/Databricks), ~$17M ARR, pivoting toward agentic category with EU expansion.",
+      "Key risk: sales-led motion (28 GTM hires) outpacing engineering (6 hires) post-pivot — product velocity may lag GTM capacity, creating a positioning-vs-delivery gap.",
+      "Confidence: HIGH for funding/leadership, MEDIUM for ARR (triangulated), MEDIUM for strategic direction (press-derived). Proceeding to Section 2 — Market Position.",
+    ],
+    queries: [
+      "Acme Corp competitive positioning summary",
+      "Acme Corp executive intelligence synthesis",
+      "Acme Corp risks sales-led vs engineering",
+    ],
+    sources: [
+      { domain: "acme.com", title: "About Acme Corp — Company Overview", url: "https://www.acme.com/about", score: 0.96 },
+      { domain: "forbes.com", title: "Acme Corp: The Quiet Infrastructure Bet", url: "https://www.forbes.com/profiles/acme-corp", score: 0.88 },
+      { domain: "betaworks.com", title: "Acme Corp — Company Analysis", url: "https://betaworks.com/analysis/acme-corp", score: 0.74 },
+    ],
+  },
+  { thoughts: [], queries: [], sources: [] },
+  { thoughts: [], queries: [], sources: [] },
+  { thoughts: [], queries: [], sources: [] },
+  { thoughts: [], queries: [], sources: [] },
+];
 
 function DeepResearcher({
-  logs,
   activeSection,
   isDone,
 }: {
-  logs: LogRow[];
   activeSection: number;
   isDone: boolean;
 }) {
   const activeMeta = SECTIONS.find((s) => s.number === activeSection);
-  const agentName = activeMeta ? `${activeMeta.shortName} Agent` : "";
+  const [activeBatch, setActiveBatch] = useState(0);
+  const [liveStream, setLiveStream] = useState(true);
+  const [fadeKey, setFadeKey] = useState(0);
 
-  const filtered = useMemo(
-    () => logs.filter((l) => l.agent_name === agentName || l.agent_name === "Orchestrator"),
-    [logs, agentName],
-  );
-
-  const thoughts = filtered.filter((l) => l.log_kind === "thought");
-  const queries = filtered.filter((l) => l.log_kind === "query");
-  const sources = filtered.filter((l) => l.log_kind === "source");
-  const scrapes = filtered.filter((l) => l.log_kind === "scrape");
-
-  // Auto-scroll thought stream to bottom
-  const thoughtsRef = useRef<HTMLDivElement>(null);
+  // Simulate live batch progression locking to the latest iteration.
   useEffect(() => {
-    thoughtsRef.current?.scrollTo({ top: thoughtsRef.current.scrollHeight, behavior: "smooth" });
-  }, [thoughts.length]);
+    if (!liveStream || isDone) return;
+    const timer = setInterval(() => {
+      setActiveBatch((prev) => {
+        const next = Math.min(prev + 1, MOCK_BATCHES.length - 1);
+        return next;
+      });
+    }, 4200);
+    return () => clearInterval(timer);
+  }, [liveStream, isDone]);
 
-  const thoughtStream = thoughts.map((t) => t.detail ?? "").join("");
+  // Re-key the panel on batch change to trigger the fade-in animation.
+  useEffect(() => {
+    setFadeKey((k) => k + 1);
+  }, [activeBatch]);
+
+  const batch = MOCK_BATCHES[activeBatch];
+  const totalQueries = batch.queries.length;
+  const totalSources = batch.sources.length;
+  const totalThoughts = batch.thoughts.length;
+
+  const selectBatch = (i: number) => {
+    setLiveStream(false);
+    setActiveBatch(i);
+  };
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {/* header strip */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-panel/50 px-4 py-3">
         <div className="flex items-center gap-2">
           <Brain className="h-4 w-4 text-primary" />
           <span className="text-sm font-medium">Deep Researcher</span>
           <Badge variant="secondary" className="font-mono text-[10px] uppercase">
-            {activeMeta?.shortName ?? "—"}
+            {activeMeta?.shortName ?? "—"} | EXECUTIVE
           </Badge>
         </div>
         <div className="flex items-center gap-4 font-mono text-[10px] uppercase text-muted-foreground">
           <span className="flex items-center gap-1">
-            <Search className="h-3 w-3" /> {queries.length} queries
+            <Search className="h-3 w-3" /> {totalQueries} queries
           </span>
           <span className="flex items-center gap-1">
-            <Globe className="h-3 w-3" /> {sources.length} sources
+            <Globe className="h-3 w-3" /> {totalSources} sources
           </span>
           <span className="flex items-center gap-1">
-            <FileDown className="h-3 w-3" /> {scrapes.filter((s) => (s.metadata as ScrapeMeta | null)?.chars).length} scraped
+            <Activity className="h-3 w-3" /> {totalThoughts} thoughts
           </span>
         </div>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[1.15fr_1fr]">
+      {/* Batch control strip */}
+      <div className="flex items-center gap-2 rounded-md border border-border/70 bg-surface/40 px-2 py-1.5">
+        <div className="flex shrink-0 items-center gap-1.5 pr-1 font-mono text-[9px] uppercase tracking-widest text-muted-foreground/70">
+          <span>Batches</span>
+        </div>
+        <ScrollArea className="flex-1">
+          <div className="flex items-center gap-1.5">
+            {MOCK_BATCHES.map((b, i) => {
+              const active = i === activeBatch;
+              const populated = b.thoughts.length > 0;
+              return (
+                <button
+                  key={i}
+                  onClick={() => selectBatch(i)}
+                  className={`group relative flex shrink-0 items-center gap-1.5 rounded border px-2 py-1 font-mono text-[10px] transition-all ${
+                    active
+                      ? "border-primary/60 bg-primary/10 text-primary shadow-[0_0_8px_-1px_oklch(0.62_0.19_275/0.55)]"
+                      : "border-border/50 bg-transparent text-muted-foreground/60 hover:border-border hover:text-muted-foreground"
+                  }`}
+                >
+                  {active && (
+                    <span className="h-1.5 w-1.5 animate-agent-pulse rounded-full bg-primary" />
+                  )}
+                  <span>{`B${i + 1}`}</span>
+                  {!populated && !active && (
+                    <span className="h-1 w-1 rounded-full bg-muted-foreground/30" />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </ScrollArea>
+        <button
+          onClick={() => setLiveStream((v) => !v)}
+          className={`flex shrink-0 items-center gap-1.5 rounded border px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-wider transition-all ${
+            liveStream
+              ? "border-primary/50 bg-primary/10 text-primary"
+              : "border-border/50 bg-transparent text-muted-foreground hover:border-border hover:text-muted-foreground"
+          }`}
+          title={liveStream ? "Live stream locked to latest batch" : "Click to lock to latest batch"}
+        >
+          <FastForward className={`h-3 w-3 ${liveStream ? "animate-pulse" : ""}`} />
+          {liveStream ? "Live" : "Hold"}
+        </button>
+      </div>
+
+      {/* Three-panel grid */}
+      <div className="grid gap-4 lg:grid-cols-[1.15fr_1fr_1fr]">
         {/* Thoughts stream */}
         <Card className="border-border bg-panel/60 p-0">
           <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
@@ -360,143 +522,164 @@ function DeepResearcher({
                 Model thoughts
               </p>
             </div>
-            {!isDone && thoughts.length > 0 && (
+            {!isDone && totalThoughts > 0 && (
               <span className="h-2 w-2 animate-agent-pulse rounded-full bg-primary" />
             )}
           </div>
           <ScrollArea className="h-[560px]">
-            <div ref={thoughtsRef} className="p-4">
-              {thoughtStream ? (
-                <div className="whitespace-pre-wrap text-[13px] leading-relaxed text-foreground/90">
-                  {thoughtStream}
-                  {!isDone && <span className="ml-0.5 animate-pulse text-primary">▊</span>}
+            <div key={`thoughts-${fadeKey}`} className="animate-in fade-in p-4 duration-300">
+              {totalThoughts > 0 ? (
+                <div className="space-y-3">
+                  {batch.thoughts.map((t, i) => (
+                    <p
+                      key={i}
+                      className="text-[13px] leading-relaxed text-foreground/90 first:font-medium"
+                      dangerouslySetInnerHTML={renderThought(t)}
+                    />
+                  ))}
+                  {!isDone && (
+                    <span className="ml-0.5 inline-block animate-pulse text-primary">▊</span>
+                  )}
                 </div>
               ) : (
-                <EmptyHint
-                  icon={Brain}
-                  title="Waiting for reasoning"
-                  hint="Model output will stream here in real time as the agent synthesizes the section."
-                />
+                <ThoughtSkeleton count={4} />
               )}
             </div>
           </ScrollArea>
         </Card>
 
-        {/* Queries + Sources column */}
-        <div className="space-y-4">
-          <Card className="border-border bg-panel/60 p-0">
-            <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
-              <div className="flex items-center gap-2">
-                <Search className="h-3.5 w-3.5 text-primary" />
-                <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                  Web queries
-                </p>
-              </div>
-              <span className="font-mono text-[10px] text-muted-foreground">{queries.length}</span>
+        {/* Web queries */}
+        <Card className="border-border bg-panel/60 p-0">
+          <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+            <div className="flex items-center gap-2">
+              <Search className="h-3.5 w-3.5 text-primary" />
+              <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                Web queries
+              </p>
             </div>
-            <ScrollArea className="h-[180px]">
-              <div className="space-y-1 p-3">
-                {queries.length === 0 ? (
-                  <EmptyHint icon={Search} title="No searches yet" />
-                ) : (
-                  queries.map((q) => {
-                    const meta = (q.metadata as QueryMeta | null) ?? {};
-                    const hits = sources.filter(
-                      (s) => ((s.metadata as SourceMeta | null)?.query ?? "") === meta.query,
-                    ).length;
-                    return (
-                      <div
-                        key={q.id}
-                        className="flex items-center gap-2 rounded border border-border/60 bg-surface/50 px-2.5 py-1.5 text-xs"
-                      >
-                        <span className="font-mono text-[10px] text-muted-foreground/70">
-                          {new Date(q.created_at).toLocaleTimeString([], {
-                            hour12: false,
-                            hour: "2-digit",
-                            minute: "2-digit",
-                            second: "2-digit",
-                          })}
-                        </span>
-                        <span className="text-primary">›</span>
-                        <span className="flex-1 truncate">{meta.query ?? q.detail}</span>
-                        {hits > 0 && (
-                          <Badge variant="outline" className="font-mono text-[9px]">
-                            {hits}
-                          </Badge>
-                        )}
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </ScrollArea>
-          </Card>
+            <span className="font-mono text-[10px] text-muted-foreground">{totalQueries}</span>
+          </div>
+          <ScrollArea className="h-[560px]">
+            <div key={`queries-${fadeKey}`} className="animate-in fade-in p-3 duration-300">
+              {totalQueries > 0 ? (
+                <div className="grid gap-1">
+                  {batch.queries.map((q, i) => (
+                    <div
+                      key={i}
+                      className="flex items-center gap-2 rounded border border-border/60 bg-surface/50 px-2.5 py-1.5 text-xs"
+                    >
+                      <span className="font-mono text-[9px] text-primary/70">{String(i + 1).padStart(2, "0")}</span>
+                      <span className="text-primary">›</span>
+                      <span className="flex-1 truncate font-mono text-[11px] text-foreground/85">{q}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <QuerySkeleton count={6} />
+              )}
+            </div>
+          </ScrollArea>
+        </Card>
 
-          <Card className="border-border bg-panel/60 p-0">
-            <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
-              <div className="flex items-center gap-2">
-                <Globe className="h-3.5 w-3.5 text-primary" />
-                <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                  Live sources
-                </p>
-              </div>
-              <span className="font-mono text-[10px] text-muted-foreground">{sources.length}</span>
+        {/* Live sources */}
+        <Card className="border-border bg-panel/60 p-0">
+          <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+            <div className="flex items-center gap-2">
+              <Globe className="h-3.5 w-3.5 text-primary" />
+              <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                Live sources
+              </p>
             </div>
-            <ScrollArea className="h-[360px]">
-              <div className="space-y-2 p-3">
-                {sources.length === 0 ? (
-                  <EmptyHint icon={Globe} title="No sources yet" />
-                ) : (
-                  sources.slice(-40).reverse().map((s) => {
-                    const meta = (s.metadata as SourceMeta | null) ?? {};
-                    const host = hostOf(meta.url);
-                    return (
-                      <a
-                        key={s.id}
-                        href={meta.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="block rounded-md border border-border/60 bg-surface/40 p-2.5 transition-colors hover:border-primary/50 hover:bg-surface"
-                      >
-                        <div className="flex items-center gap-2">
-                          <FaviconDot host={host} />
-                          <p className="flex-1 truncate text-[12px] font-medium text-foreground/90">
-                            {meta.title ?? meta.url}
-                          </p>
-                          <span className="font-mono text-[9px] text-muted-foreground">{host}</span>
-                        </div>
-                        {meta.snippet && (
-                          <p className="mt-1.5 line-clamp-3 text-[11px] leading-snug text-muted-foreground">
-                            {highlightSnippet(meta.snippet, meta.query)}
-                          </p>
-                        )}
-                      </a>
-                    );
-                  })
-                )}
-              </div>
-            </ScrollArea>
-          </Card>
-        </div>
+            <span className="font-mono text-[10px] text-muted-foreground">{totalSources}</span>
+          </div>
+          <ScrollArea className="h-[560px]">
+            <div key={`sources-${fadeKey}`} className="animate-in fade-in p-3 duration-300">
+              {totalSources > 0 ? (
+                <div className="grid gap-1.5">
+                  {batch.sources.map((s, i) => (
+                    <a
+                      key={i}
+                      href={s.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block rounded-md border border-border/60 bg-surface/40 p-2 transition-colors hover:border-primary/50 hover:bg-surface"
+                    >
+                      <div className="flex items-center gap-2">
+                        <FaviconDot host={s.domain} />
+                        <p className="flex-1 truncate text-[11px] font-medium text-foreground/90">
+                          {s.title}
+                        </p>
+                      </div>
+                      <div className="mt-1 flex items-center justify-between font-mono text-[9px] text-muted-foreground">
+                        <span className="truncate">{s.domain}</span>
+                        <span className="shrink-0 text-primary/70">{(s.score * 100).toFixed(0)}%</span>
+                      </div>
+                    </a>
+                  ))}
+                </div>
+              ) : (
+                <SourceSkeleton count={6} />
+              )}
+            </div>
+          </ScrollArea>
+        </Card>
       </div>
     </div>
   );
 }
 
-function EmptyHint({
-  icon: Icon,
-  title,
-  hint,
-}: {
-  icon: React.ComponentType<{ className?: string }>;
-  title: string;
-  hint?: string;
-}) {
+// Lightweight inline markdown renderer for **bold** spans in thought text.
+function renderThought(text: string) {
+  const html = text.replace(/\*\*(.+?)\*\*/g, '<strong class="font-semibold text-foreground">$1</strong>');
+  return { __html: html };
+}
+
+function ThoughtSkeleton({ count }: { count: number }) {
   return (
-    <div className="flex flex-col items-center justify-center py-10 text-center">
-      <Icon className="h-6 w-6 text-muted-foreground/40" />
-      <p className="mt-2 text-xs font-medium text-muted-foreground">{title}</p>
-      {hint && <p className="mt-1 max-w-xs text-[11px] text-muted-foreground/70">{hint}</p>}
+    <div className="space-y-3 p-1">
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} className="space-y-1.5">
+          <div className="h-3 w-[90%] animate-pulse rounded bg-primary/10 font-mono" />
+          <div className="h-3 w-[75%] animate-pulse rounded bg-primary/10 font-mono" />
+          <div className="h-3 w-[82%] animate-pulse rounded bg-primary/10 font-mono" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function QuerySkeleton({ count }: { count: number }) {
+  return (
+    <div className="space-y-1">
+      {Array.from({ length: count }).map((_, i) => (
+        <div
+          key={i}
+          className="flex items-center gap-2 rounded border border-border/40 bg-surface/30 px-2.5 py-1.5"
+        >
+          <div className="h-2 w-3 animate-pulse rounded bg-primary/10 font-mono" />
+          <span className="text-primary/30">›</span>
+          <div className="h-2.5 flex-1 animate-pulse rounded bg-primary/10 font-mono" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SourceSkeleton({ count }: { count: number }) {
+  return (
+    <div className="space-y-1.5">
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={i} className="rounded-md border border-border/40 bg-surface/30 p-2">
+          <div className="flex items-center gap-2">
+            <div className="h-4 w-4 shrink-0 animate-pulse rounded-sm bg-primary/10" />
+            <div className="h-2.5 flex-1 animate-pulse rounded bg-primary/10" />
+          </div>
+          <div className="mt-1.5 flex items-center justify-between">
+            <div className="h-2 w-20 animate-pulse rounded bg-primary/10 font-mono" />
+            <div className="h-2 w-6 animate-pulse rounded bg-primary/10 font-mono" />
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -512,42 +695,6 @@ function FaviconDot({ host }: { host: string }) {
       onError={(e) => ((e.currentTarget.style.visibility = "hidden"))}
     />
   );
-}
-
-function hostOf(url?: string): string {
-  if (!url) return "";
-  try {
-    return new URL(url).hostname.replace(/^www\./, "");
-  } catch {
-    return "";
-  }
-}
-
-function highlightSnippet(snippet: string, query?: string) {
-  if (!query) return snippet;
-  const terms = Array.from(
-    new Set(
-      query
-        .toLowerCase()
-        .split(/\s+/)
-        .filter((t) => t.length > 3 && !/^(the|and|with|from|that|this|for)$/.test(t)),
-    ),
-  );
-  if (terms.length === 0) return snippet;
-  const pattern = new RegExp(`(${terms.map(escapeRe).join("|")})`, "gi");
-  const parts = snippet.split(pattern);
-  return parts.map((p, i) =>
-    pattern.test(p) ? (
-      <mark key={i} className="rounded-sm bg-primary/20 px-0.5 text-primary">
-        {p}
-      </mark>
-    ) : (
-      <span key={i}>{p}</span>
-    ),
-  );
-}
-function escapeRe(s: string) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /* -------------------------------------------------------------------------- */
