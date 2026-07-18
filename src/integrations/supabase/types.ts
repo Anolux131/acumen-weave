@@ -304,6 +304,42 @@ export type Database = {
           },
         ]
       }
+      user_settings: {
+        Row: {
+          ai_provider: string
+          created_at: string
+          gemini_api_key: string | null
+          groq_api_key: string | null
+          id: string
+          openrouter_api_key: string | null
+          selected_model: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          ai_provider?: string
+          created_at?: string
+          gemini_api_key?: string | null
+          groq_api_key?: string | null
+          id?: string
+          openrouter_api_key?: string | null
+          selected_model?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          ai_provider?: string
+          created_at?: string
+          gemini_api_key?: string | null
+          groq_api_key?: string | null
+          id?: string
+          openrouter_api_key?: string | null
+          selected_model?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

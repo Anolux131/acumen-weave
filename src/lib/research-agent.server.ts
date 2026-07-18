@@ -4,6 +4,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { getSection, ACTIVE_SECTION_NUMBERS } from "./section-config";
+import { resolveProvider, type ProviderConfig } from "./ai-provider.server";
 
 type TavilyResult = { url: string; title: string; content: string; score?: number };
 type ScrapeResult = { url: string; markdown: string; error?: string };
@@ -11,8 +12,6 @@ type LogKind = "status" | "query" | "source" | "scrape" | "thought";
 
 const TAVILY_URL = "https://api.tavily.com/search";
 const FIRECRAWL_URL = "https://api.firecrawl.dev/v1/scrape";
-const LOVABLE_AI_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
-const ANALYSIS_MODEL = "google/gemini-2.5-flash";
 
 function admin() {
   return createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
@@ -93,17 +92,13 @@ async function analyzeStreamed(
   agent: string,
   systemPrompt: string,
   userContext: string,
+  provider: ProviderConfig,
 ): Promise<{ text: string; tokens: number }> {
-  const key = process.env.LOVABLE_API_KEY;
-  if (!key) throw new Error("LOVABLE_API_KEY missing");
-  const res = await fetch(LOVABLE_AI_URL, {
+  const res = await fetch(provider.endpoint, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Lovable-API-Key": key,
-    },
+    headers: provider.headers,
     body: JSON.stringify({
-      model: ANALYSIS_MODEL,
+      model: provider.model,
       stream: true,
       messages: [
         { role: "system", content: systemPrompt },
@@ -113,7 +108,7 @@ async function analyzeStreamed(
   });
   if (!res.ok || !res.body) {
     const body = await res.text().catch(() => "");
-    throw new Error(`Lovable AI ${res.status}: ${body.slice(0, 400)}`);
+    throw new Error(`${provider.provider} ${res.status}: ${body.slice(0, 400)}`);
   }
 
   const reader = res.body.getReader();
@@ -191,6 +186,7 @@ export async function runSection(opts: {
   companyName: string;
   companyUrl?: string;
   industry?: string;
+  provider: ProviderConfig;
 }): Promise<void> {
   const t0 = Date.now();
   const db = admin();
@@ -275,8 +271,8 @@ ${scrapedContent}
 Analyze the above data and produce Section ${section.number}: ${section.name}. Follow the required output structure exactly.`;
 
     // 4. Streamed analysis
-    await log(opts.jobId, agent, "status", `Synthesizing with ${ANALYSIS_MODEL}`);
-    const { text: analyzed, tokens } = await analyzeStreamed(opts.jobId, agent, section.systemPrompt, userContext);
+    await log(opts.jobId, agent, "status", `Synthesizing with ${opts.provider.provider}:${opts.provider.model}`);
+    const { text: analyzed, tokens } = await analyzeStreamed(opts.jobId, agent, section.systemPrompt, userContext, opts.provider);
     const confidence = extractConfidence(analyzed);
     const findings = extractKeyFindings(analyzed);
 
@@ -321,6 +317,7 @@ export async function runSynthesisSection(opts: {
   userId: string;
   sectionNumber: number;
   companyName: string;
+  provider: ProviderConfig;
 }): Promise<void> {
   const t0 = Date.now();
   const db = admin();
@@ -350,7 +347,7 @@ export async function runSynthesisSection(opts: {
     const userContext = `Target company: ${opts.companyName}\n\n${context}\n\nProduce the Executive Recommendations brief exactly as specified.`;
 
     await log(opts.jobId, agent, "status", `Synthesizing across ${priors.length} sections`);
-    const { text, tokens } = await analyzeStreamed(opts.jobId, agent, section.systemPrompt, userContext);
+    const { text, tokens } = await analyzeStreamed(opts.jobId, agent, section.systemPrompt, userContext, opts.provider);
     const confidence = extractConfidence(text);
     const findings = extractKeyFindings(text);
 
@@ -565,6 +562,18 @@ export async function runResearchJob(jobId: string): Promise<void> {
   const researchSections = allSections.filter((n) => !getSection(n).synthesis);
   const synthesisSections = allSections.filter((n) => getSection(n).synthesis);
 
+  // Resolve AI provider (BYO keys + model selection) once per job.
+  let provider: ProviderConfig;
+  try {
+    provider = await resolveProvider(job.user_id);
+    await log(jobId, "Orchestrator", "status", "AI provider connected", `${provider.provider} • ${provider.model}`, { provider: provider.provider, model: provider.model }, "done");
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    await db.from("research_jobs").update({ status: "failed", current_phase: "AI provider error", error_message: msg }).eq("id", jobId);
+    await log(jobId, "Orchestrator", "status", "AI provider not available", msg, { error: msg }, "error");
+    throw e;
+  }
+
   await db
     .from("research_jobs")
     .update({
@@ -589,6 +598,7 @@ export async function runResearchJob(jobId: string): Promise<void> {
           companyName: job.company_name,
           companyUrl: job.company_url ?? undefined,
           industry: job.industry ?? undefined,
+          provider,
         }),
       ),
     );
@@ -597,7 +607,7 @@ export async function runResearchJob(jobId: string): Promise<void> {
   // Wave 2: synthesis (14)
   await db.from("research_jobs").update({ current_phase: "Synthesizing", progress_percentage: 92 }).eq("id", jobId);
   for (const n of synthesisSections) {
-    await runSynthesisSection({ jobId, userId: job.user_id, sectionNumber: n, companyName: job.company_name });
+    await runSynthesisSection({ jobId, userId: job.user_id, sectionNumber: n, companyName: job.company_name, provider });
   }
 
   // Wave 3: contacts + report — run in parallel
