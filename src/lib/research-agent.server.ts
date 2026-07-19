@@ -93,6 +93,7 @@ async function analyzeStreamed(
   systemPrompt: string,
   userContext: string,
   provider: ProviderConfig,
+  sectionMeta?: { number: number; name: string },
 ): Promise<{ text: string; tokens: number }> {
   const res = await fetch(provider.endpoint, {
     method: "POST",
