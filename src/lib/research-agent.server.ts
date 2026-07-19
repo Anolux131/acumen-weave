@@ -123,7 +123,7 @@ async function analyzeStreamed(
     while (pending.length >= CHUNK || (force && pending.length > 0)) {
       const slice = pending.slice(0, CHUNK);
       pending = pending.slice(slice.length);
-      await log(jobId, agent, "thought", "reasoning", slice);
+      await log(jobId, agent, "thought", "reasoning", slice, sectionMeta ? { sectionNumber: sectionMeta.number } : undefined);
       if (!force) break;
     }
   };
@@ -205,7 +205,17 @@ export async function runSection(opts: {
     .update({ current_agent: agent, current_phase: `Running ${section.name}` })
     .eq("id", opts.jobId);
 
-  await log(opts.jobId, agent, "status", "Agent deployed", section.focus, { sectionNumber: section.number, sectionName: section.name }, "started");
+  const sectionMeta = { number: section.number, name: section.name };
+  const slog = (
+    kind: LogKind,
+    action: string,
+    detail?: string,
+    metadata?: Record<string, unknown>,
+    status: "started" | "working" | "done" | "error" = "working",
+  ) =>
+    log(opts.jobId, agent, kind, action, detail, { ...(metadata ?? {}), sectionNumber: section.number, sectionName: section.name }, status);
+
+  await slog("status", "Agent deployed", section.focus, {}, "started");
 
   try {
     const url = normalizeUrl(opts.companyUrl);
@@ -215,11 +225,11 @@ export async function runSection(opts: {
     const allResults: TavilyResult[] = [];
     await Promise.all(
       queries.map(async (q) => {
-        await log(opts.jobId, agent, "query", "Search", q, { query: q });
+        await slog("query", "Search", q, { query: q });
         const rs = await tavilySearch(q);
         allResults.push(...rs);
         for (const r of rs.slice(0, 3)) {
-          await log(opts.jobId, agent, "source", "Source", r.title, {
+          await slog("source", "Source", r.title, {
             url: r.url,
             title: r.title,
             snippet: (r.content ?? "").slice(0, 320),
@@ -239,11 +249,11 @@ export async function runSection(opts: {
       for (const p of section.scrapePaths) companySiteScrapes.push(`${origin}${p}`);
     }
     const urlsToScrape = Array.from(new Set([...companySiteScrapes, ...topResults.slice(0, 5).map((r) => r.url)]));
-    await log(opts.jobId, agent, "status", `Scraping ${urlsToScrape.length} pages`);
+    await slog("status", `Scraping ${urlsToScrape.length} pages`);
     const scrapes = await Promise.all(
       urlsToScrape.map(async (u) => {
         const s = await firecrawlScrape(u);
-        await log(opts.jobId, agent, "scrape", s.markdown ? "Extracted" : "Skipped", s.error || `${s.markdown.length.toLocaleString()} chars`, { url: u, chars: s.markdown.length, error: s.error });
+        await slog("scrape", s.markdown ? "Extracted" : "Skipped", s.error || `${s.markdown.length.toLocaleString()} chars`, { url: u, chars: s.markdown.length, error: s.error });
         return s;
       }),
     );
@@ -272,8 +282,8 @@ ${scrapedContent}
 Analyze the above data and produce Section ${section.number}: ${section.name}. Follow the required output structure exactly.`;
 
     // 4. Streamed analysis
-    await log(opts.jobId, agent, "status", `Synthesizing with ${opts.provider.provider}:${opts.provider.model}`);
-    const { text: analyzed, tokens } = await analyzeStreamed(opts.jobId, agent, section.systemPrompt, userContext, opts.provider);
+    await slog("status", `Synthesizing with ${opts.provider.provider}:${opts.provider.model}`);
+    const { text: analyzed, tokens } = await analyzeStreamed(opts.jobId, agent, section.systemPrompt, userContext, opts.provider, sectionMeta);
     const confidence = extractConfidence(analyzed);
     const findings = extractKeyFindings(analyzed);
 
@@ -296,7 +306,7 @@ Analyze the above data and produce Section ${section.number}: ${section.name}. F
 
     await bumpProgress(opts.jobId);
 
-    await log(opts.jobId, agent, "status", "Section complete", `Confidence ${confidence}% • ${findings.length} findings`, { confidence, findings: findings.length }, "done");
+    await slog("status", "Section complete", `Confidence ${confidence}% • ${findings.length} findings`, { confidence, findings: findings.length }, "done");
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error(`Section ${opts.sectionNumber} failed:`, msg);
@@ -305,7 +315,7 @@ Analyze the above data and produce Section ${section.number}: ${section.name}. F
       .update({ status: "failed", analyzed_content: `Error: ${msg}`, processing_time_ms: Date.now() - t0 })
       .eq("job_id", opts.jobId)
       .eq("section_number", opts.sectionNumber);
-    await log(opts.jobId, agent, "status", "Section failed", msg, { error: msg }, "error");
+    await slog("status", "Section failed", msg, { error: msg }, "error");
   }
 }
 
@@ -327,7 +337,17 @@ export async function runSynthesisSection(opts: {
 
   await db.from("section_results").update({ status: "running" }).eq("job_id", opts.jobId).eq("section_number", opts.sectionNumber);
   await db.from("research_jobs").update({ current_agent: agent, current_phase: "Synthesizing executive brief" }).eq("id", opts.jobId);
-  await log(opts.jobId, agent, "status", "Synthesizer deployed", "Reading all prior sections", { sectionNumber: section.number }, "started");
+  const sectionMeta = { number: section.number, name: section.name };
+  const slog = (
+    kind: LogKind,
+    action: string,
+    detail?: string,
+    metadata?: Record<string, unknown>,
+    status: "started" | "working" | "done" | "error" = "working",
+  ) =>
+    log(opts.jobId, agent, kind, action, detail, { ...(metadata ?? {}), sectionNumber: section.number, sectionName: section.name }, status);
+
+  await slog("status", "Synthesizer deployed", "Reading all prior sections", {}, "started");
 
   try {
     const { data: priors } = await db
@@ -347,8 +367,16 @@ export async function runSynthesisSection(opts: {
 
     const userContext = `Target company: ${opts.companyName}\n\n${context}\n\nProduce the Executive Recommendations brief exactly as specified.`;
 
-    await log(opts.jobId, agent, "status", `Synthesizing across ${priors.length} sections`);
-    const { text, tokens } = await analyzeStreamed(opts.jobId, agent, section.systemPrompt, userContext, opts.provider);
+    await slog("status", `Synthesizing across ${priors.length} sections`);
+    for (const p of priors) {
+      await slog("source", "Prior section", `Section ${p.section_number}: ${p.section_name}`, {
+        url: `#section-${p.section_number}`,
+        title: `Section ${p.section_number}: ${p.section_name}`,
+        score: (p.confidence_score ?? 0) / 100,
+        snippet: (p.analyzed_content ?? "").slice(0, 320),
+      });
+    }
+    const { text, tokens } = await analyzeStreamed(opts.jobId, agent, section.systemPrompt, userContext, opts.provider, sectionMeta);
     const confidence = extractConfidence(text);
     const findings = extractKeyFindings(text);
 
@@ -367,11 +395,11 @@ export async function runSynthesisSection(opts: {
       .eq("section_number", opts.sectionNumber);
 
     await bumpProgress(opts.jobId);
-    await log(opts.jobId, agent, "status", "Executive brief complete", `Confidence ${confidence}%`, { confidence }, "done");
+    await slog("status", "Executive brief complete", `Confidence ${confidence}%`, { confidence }, "done");
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     await db.from("section_results").update({ status: "failed", analyzed_content: `Error: ${msg}`, processing_time_ms: Date.now() - t0 }).eq("job_id", opts.jobId).eq("section_number", opts.sectionNumber);
-    await log(opts.jobId, agent, "status", "Synthesis failed", msg, { error: msg }, "error");
+    await slog("status", "Synthesis failed", msg, { error: msg }, "error");
   }
 }
 
