@@ -56,7 +56,7 @@ export async function resolveProvider(userId: string): Promise<ProviderConfig> {
     case "lovable": {
       const key = process.env.LOVABLE_API_KEY;
       if (!key) throw new Error("LOVABLE_API_KEY missing on server");
-      headers["Lovable-API-Key"] = key;
+      headers["Authorization"] = `Bearer ${key}`;
       break;
     }
     case "groq": {
