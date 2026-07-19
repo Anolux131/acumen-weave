@@ -245,7 +245,7 @@ function ResearchProgress() {
             </TabsList>
 
             <TabsContent value="researcher" className="mt-4">
-              <DeepResearcher activeSection={active} isDone={isDone} />
+              <DeepResearcher activeSection={active} sections={sections} logs={logs} isDone={isDone} />
             </TabsContent>
 
             <TabsContent value="section" className="mt-4">
@@ -274,171 +274,143 @@ function ResearchProgress() {
 /*                            Deep Researcher panel                            */
 /* -------------------------------------------------------------------------- */
 
-type BatchPayload = {
-  thoughts: string[];
-  queries: string[];
-  sources: { domain: string; title: string; url: string; score: number }[];
+type Batch = {
+  number: number;
+  name: string;
+  shortName: string;
+  status: SectionRow["status"] | "queued";
+  thoughts: LogRow[];
+  queries: { query: string; at: string }[];
+  sources: { domain: string; title: string; url: string; score: number; snippet?: string }[];
 };
 
-// Mock multi-batch execution telemetry. Batches 7-10 are intentionally empty
-// to exercise the loading-skeleton path for pending iterations.
-const MOCK_BATCHES: BatchPayload[] = [
-  {
-    thoughts: [
-      "**Batch 1 — Planning.** Decomposing the executive intelligence brief. Priority axes: funding history, leadership chain, ARR signals, and 12-month news delta.",
-      "Mapping known anchors: Crunchbase + PitchBook for funding rounds, LinkedIn for leadership, and recent press indexes for strategic direction deltas.",
-      "Confidence calibration: funding and leadership are HIGH evidence; ARR is MEDIUM (rarely disclosed) — will triangulate via headcount growth and pricing tiers.",
-    ],
-    queries: [
-      "Acme Corp funding round Series A B C",
-      "Acme Corp CEO founder leadership team",
-      "Acme Corp ARR revenue growth 2025",
-      "Acme Corp crunchbase profile valuation",
-    ],
-    sources: [
-      { domain: "crunchbase.com", title: "Acme Corp — Funding, Valuation & Investors", url: "https://www.crunchbase.com/organization/acme-corp", score: 0.98 },
-      { domain: "pitchbook.com", title: "Acme Corp Company Profile | PitchBook", url: "https://pitchbook.com/profiles/acme-corp", score: 0.94 },
-      { domain: "linkedin.com", title: "Acme Corp | Leadership & Employees", url: "https://www.linkedin.com/company/acme-corp", score: 0.91 },
-      { domain: "techcrunch.com", title: "Acme Corp raises $42M Series B to expand go-to-market", url: "https://techcrunch.com/2025/03/acme-series-b", score: 0.88 },
-    ],
-  },
-  {
-    thoughts: [
-      "**Batch 2 — Funding triangulation.** Series B confirmed ($42M, Mar 2025, led by Sequoia). Cross-referencing prior rounds: Seed $3.1M (2021), Series A $11M (2023).",
-      "Cumulative raised: ~$56M. Implied post-money at B: ~$210M. Burn rate inference: 18-month runway at current headcount (94 employees per LinkedIn).",
-      "Strategic direction delta: press release language shifted from 'platform' to 'infrastructure' framing — signals category repositioning post-Series B.",
-    ],
-    queries: [
-      "Acme Corp Sequoia Series B lead investor",
-      "Acme Corp seed funding history 2021",
-      "Acme Corp post-money valuation 210M",
-      "Acme Corp headcount 94 employees LinkedIn",
-    ],
-    sources: [
-      { domain: "sequoiacap.com", title: "Our Investment in Acme Corp", url: "https://www.sequoiacap.com/posts/acme-corp", score: 0.96 },
-      { domain: "bloomberg.com", title: "Acme Corp Valuation Reaches $210 Million in Series B", url: "https://www.bloomberg.com/news/acme-series-b", score: 0.93 },
-      { domain: "angel.co", title: "Acme Corp — Seed Round (2021)", url: "https://angel.co/company/acme-corp/seed", score: 0.82 },
-      { domain: "growjo.com", title: "Acme Corp Employee Count & Revenue", url: "https://growjo.com/company/acme-corp", score: 0.76 },
-    ],
-  },
-  {
-    thoughts: [
-      "**Batch 3 — Leadership chain.** Founder/CEO: Sarah Chen (ex-Stripe PM). Co-founder/CTO: Marcus Vega (ex-Databricks). Recent hire: VP Sales from Gong (Q1 2025) — indicates sales-led motion intensifying.",
-      "Board composition: 5 seats — 2 founder, 2 investor (Sequoia, a16z), 1 independent (former CFO of Snowflake). Strong governance signal for Series C readiness.",
-      "Hiring velocity: 28 open roles, 22 in go-to-market vs 6 in engineering. Confirms the sales-led pivot inferred from the VP Sales hire.",
-    ],
-    queries: [
-      "Sarah Chen Acme Corp CEO ex-Stripe",
-      "Marcus Vega Acme Corp CTO Databricks",
-      "Acme Corp VP Sales Gong hire 2025",
-      "Acme Corp board of directors composition",
-      "Acme Corp open roles hiring 2025",
-    ],
-    sources: [
-      { domain: "linkedin.com", title: "Sarah Chen — CEO at Acme Corp", url: "https://www.linkedin.com/in/sarah-chen-acme", score: 0.95 },
-      { domain: "linkedin.com", title: "Marcus Vega — CTO at Acme Corp", url: "https://www.linkedin.com/in/marcus-vega-acme", score: 0.92 },
-      { domain: "github.com", title: "marcusvega (Marcus Vega) · GitHub", url: "https://github.com/marcusvega", score: 0.78 },
-      { domain: "acme.com", title: "Open Roles — Acme Corp Careers", url: "https://www.acme.com/careers", score: 0.89 },
-    ],
-  },
-  {
-    thoughts: [
-      "**Batch 4 — Revenue signals.** No disclosed ARR. Triangulating: 94 employees × $180K avg SaaS revenue/employee ≈ $17M ARR (ballpark, MEDIUM confidence).",
-      "Pricing page indicates 3 tiers: Starter ($49/mo), Growth ($499/mo), Enterprise (custom). Bottom-up PLG signature with sales-assist at Growth+ tier.",
-      "Customer count inference from case studies: ~340 named accounts. Blended ACV ~$50K → supports ~$17M ARR estimate within 20% margin.",
-    ],
-    queries: [
-      "Acme Corp pricing tiers Starter Growth Enterprise",
-      "Acme Corp customer count case studies",
-      "Acme Corp annual contract value ACV",
-      "Acme Corp ARR estimate 17M",
-    ],
-    sources: [
-      { domain: "acme.com", title: "Pricing — Acme Corp", url: "https://www.acme.com/pricing", score: 0.99 },
-      { domain: "g2.com", title: "Acme Corp Reviews & Pricing 2025", url: "https://www.g2.com/products/acme-corp/pricing", score: 0.9 },
-      { domain: "capterra.com", title: "Acme Corp Pricing, Features & Reviews", url: "https://www.capterra.com/p/acme-corp", score: 0.85 },
-      { domain: "acme.com", title: "Customer Stories — Acme Corp", url: "https://www.acme.com/customers", score: 0.87 },
-    ],
-  },
-  {
-    thoughts: [
-      "**Batch 5 — Strategic direction & news delta.** Three notable press events in last 12 months: (1) Series B close Mar 2025, (2) AI agent product launch Jul 2025, (3) EU expansion announcement Oct 2025.",
-      "The AI agent launch is the strongest strategic signal — pivots the company from workflow automation toward agentic orchestration, a more defensible category.",
-      "EU expansion implies localization + compliance investment (GDPR-heavy). Watch for DPO hire and ISO 27001 certification as precursors to enterprise EU deals.",
-    ],
-    queries: [
-      "Acme Corp AI agent launch July 2025",
-      "Acme Corp EU expansion Europe 2025",
-      "Acme Corp product roadmap agentic orchestration",
-      "Acme Corp GDPR ISO 27001 compliance",
-    ],
-    sources: [
-      { domain: "acme.com", title: "Introducing Acme Agents — Autonomous Workflows", url: "https://www.acme.com/blog/acme-agents-launch", score: 0.97 },
-      { domain: "venturebeat.com", title: "Acme Corp launches AI agents for enterprise workflows", url: "https://venturebeat.com/2025/07/acme-agents", score: 0.9 },
-      { domain: "acme.com", title: "Acme Corp Expands to EMEA Region", url: "https://www.acme.com/press/emea-expansion", score: 0.93 },
-      { domain: "sifted.eu", title: "Acme Corp opens Berlin office targeting DACH market", url: "https://sifted.eu/articles/acme-corp-berlin", score: 0.84 },
-    ],
-  },
-  {
-    thoughts: [
-      "**Batch 6 — Synthesis & calibration.** Executive picture is converging: well-funded ($56M cum), strong leadership (ex-Stripe/Databricks), ~$17M ARR, pivoting toward agentic category with EU expansion.",
-      "Key risk: sales-led motion (28 GTM hires) outpacing engineering (6 hires) post-pivot — product velocity may lag GTM capacity, creating a positioning-vs-delivery gap.",
-      "Confidence: HIGH for funding/leadership, MEDIUM for ARR (triangulated), MEDIUM for strategic direction (press-derived). Proceeding to Section 2 — Market Position.",
-    ],
-    queries: [
-      "Acme Corp competitive positioning summary",
-      "Acme Corp executive intelligence synthesis",
-      "Acme Corp risks sales-led vs engineering",
-    ],
-    sources: [
-      { domain: "acme.com", title: "About Acme Corp — Company Overview", url: "https://www.acme.com/about", score: 0.96 },
-      { domain: "forbes.com", title: "Acme Corp: The Quiet Infrastructure Bet", url: "https://www.forbes.com/profiles/acme-corp", score: 0.88 },
-      { domain: "betaworks.com", title: "Acme Corp — Company Analysis", url: "https://betaworks.com/analysis/acme-corp", score: 0.74 },
-    ],
-  },
-  { thoughts: [], queries: [], sources: [] },
-  { thoughts: [], queries: [], sources: [] },
-  { thoughts: [], queries: [], sources: [] },
-  { thoughts: [], queries: [], sources: [] },
-];
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
 
 function DeepResearcher({
   activeSection,
+  sections,
+  logs,
   isDone,
 }: {
   activeSection: number;
+  sections: SectionRow[];
+  logs: LogRow[];
   isDone: boolean;
 }) {
-  const activeMeta = SECTIONS.find((s) => s.number === activeSection);
-  const [activeBatch, setActiveBatch] = useState(0);
-  const [liveStream, setLiveStream] = useState(true);
-  const [fadeKey, setFadeKey] = useState(0);
+  const [autoStream, setAutoStream] = useState(true);
+  const [manualBatch, setManualBatch] = useState<number | null>(null);
+  const thoughtsRef = useRef<HTMLDivElement>(null);
 
-  // Simulate live batch progression locking to the latest iteration.
+  // Build batches from ACTIVE sections; each section = one batch.
+  const batches: Batch[] = useMemo(() => {
+    return ACTIVE_SECTION_NUMBERS.map((num) => {
+      const meta = SECTIONS.find((s) => s.number === num)!;
+      const row = sections.find((s) => s.section_number === num);
+      const sectionLogs = logs.filter(
+        (l) => (l.metadata as { sectionNumber?: number } | null)?.sectionNumber === num,
+      );
+
+      const thoughts = sectionLogs.filter((l) => l.log_kind === "thought");
+
+      const queriesMap = new Map<string, string>();
+      for (const l of sectionLogs) {
+        if (l.log_kind !== "query") continue;
+        const q = (l.metadata as { query?: string } | null)?.query ?? l.detail ?? "";
+        if (q && !queriesMap.has(q)) queriesMap.set(q, l.created_at);
+      }
+      const queries = Array.from(queriesMap.entries()).map(([query, at]) => ({ query, at }));
+
+      const sourcesMap = new Map<
+        string,
+        { domain: string; title: string; url: string; score: number; snippet?: string }
+      >();
+      for (const l of sectionLogs) {
+        if (l.log_kind !== "source") continue;
+        const md = (l.metadata as {
+          url?: string;
+          title?: string;
+          score?: number;
+          snippet?: string;
+        } | null) ?? {};
+        const url = md.url ?? "";
+        if (!url || sourcesMap.has(url)) continue;
+        sourcesMap.set(url, {
+          domain: hostOf(url),
+          title: md.title ?? l.detail ?? url,
+          url,
+          score: typeof md.score === "number" ? md.score : 0.6,
+          snippet: md.snippet,
+        });
+      }
+      const sources = Array.from(sourcesMap.values()).sort((a, b) => b.score - a.score);
+
+      return {
+        number: meta.number,
+        name: meta.name,
+        shortName: meta.shortName,
+        status: row?.status ?? "queued",
+        thoughts,
+        queries,
+        sources,
+      };
+    });
+  }, [sections, logs]);
+
+  // Determine the "latest active" batch — the currently-running section, or the
+  // last one with activity.
+  const latestBatchIndex = useMemo(() => {
+    const runningIdx = batches.findIndex((b) => b.status === "running");
+    if (runningIdx >= 0) return runningIdx;
+    let last = 0;
+    batches.forEach((b, i) => {
+      if (b.thoughts.length + b.queries.length + b.sources.length > 0) last = i;
+    });
+    return last;
+  }, [batches]);
+
+  // Auto-select: prefer the section the user picked in the sidebar; otherwise
+  // follow the latest active batch when auto-stream is on.
+  const sidebarIdx = batches.findIndex((b) => b.number === activeSection);
+  const effectiveIdx =
+    manualBatch != null
+      ? manualBatch
+      : sidebarIdx >= 0 && !autoStream
+      ? sidebarIdx
+      : autoStream
+      ? latestBatchIndex
+      : sidebarIdx >= 0
+      ? sidebarIdx
+      : 0;
+
+  const active = batches[effectiveIdx] ?? batches[0];
+
+  // Auto-scroll thoughts stream when new content arrives on the active batch.
   useEffect(() => {
-    if (!liveStream || isDone) return;
-    const timer = setInterval(() => {
-      setActiveBatch((prev) => {
-        const next = Math.min(prev + 1, MOCK_BATCHES.length - 1);
-        return next;
-      });
-    }, 4200);
-    return () => clearInterval(timer);
-  }, [liveStream, isDone]);
+    if (!autoStream) return;
+    thoughtsRef.current?.scrollTo({
+      top: thoughtsRef.current.scrollHeight,
+      behavior: "smooth",
+    });
+  }, [active?.thoughts.length, autoStream]);
 
-  // Re-key the panel on batch change to trigger the fade-in animation.
-  useEffect(() => {
-    setFadeKey((k) => k + 1);
-  }, [activeBatch]);
-
-  const batch = MOCK_BATCHES[activeBatch];
-  const totalQueries = batch.queries.length;
-  const totalSources = batch.sources.length;
-  const totalThoughts = batch.thoughts.length;
+  const totalQueries = active?.queries.length ?? 0;
+  const totalSources = active?.sources.length ?? 0;
+  const totalThoughts = active?.thoughts.length ?? 0;
 
   const selectBatch = (i: number) => {
-    setLiveStream(false);
-    setActiveBatch(i);
+    setAutoStream(false);
+    setManualBatch(i);
+  };
+
+  const enableAutoStream = () => {
+    setAutoStream(true);
+    setManualBatch(null);
   };
 
   return (
@@ -449,8 +421,14 @@ function DeepResearcher({
           <Brain className="h-4 w-4 text-primary" />
           <span className="text-sm font-medium">Deep Researcher</span>
           <Badge variant="secondary" className="font-mono text-[10px] uppercase">
-            {activeMeta?.shortName ?? "—"} | EXECUTIVE
+            {active?.shortName ?? "—"} | B{effectiveIdx + 1}/{batches.length}
           </Badge>
+          {active?.status === "running" && (
+            <span className="flex items-center gap-1 font-mono text-[10px] uppercase text-primary">
+              <span className="h-1.5 w-1.5 animate-agent-pulse rounded-full bg-primary" />
+              live
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-4 font-mono text-[10px] uppercase text-muted-foreground">
           <span className="flex items-center gap-1">
@@ -470,44 +448,52 @@ function DeepResearcher({
         <div className="flex shrink-0 items-center gap-1.5 pr-1 font-mono text-[9px] uppercase tracking-widest text-muted-foreground/70">
           <span>Batches</span>
         </div>
-        <ScrollArea className="flex-1">
+        <div className="flex-1 overflow-x-auto">
           <div className="flex items-center gap-1.5">
-            {MOCK_BATCHES.map((b, i) => {
-              const active = i === activeBatch;
-              const populated = b.thoughts.length > 0;
+            {batches.map((b, i) => {
+              const isActive = i === effectiveIdx;
+              const populated =
+                b.thoughts.length + b.queries.length + b.sources.length > 0 ||
+                b.status === "running";
+              const failed = b.status === "failed";
+              const complete = b.status === "complete";
               return (
                 <button
-                  key={i}
+                  key={b.number}
                   onClick={() => selectBatch(i)}
+                  title={`${b.name} — ${b.status}`}
                   className={`group relative flex shrink-0 items-center gap-1.5 rounded border px-2 py-1 font-mono text-[10px] transition-all ${
-                    active
+                    isActive
                       ? "border-primary/60 bg-primary/10 text-primary shadow-[0_0_8px_-1px_oklch(0.62_0.19_275/0.55)]"
-                      : "border-border/50 bg-transparent text-muted-foreground/60 hover:border-border hover:text-muted-foreground"
+                      : failed
+                      ? "border-destructive/40 text-destructive/70 hover:border-destructive/60"
+                      : complete
+                      ? "border-success/30 text-success/80 hover:border-success/50"
+                      : populated
+                      ? "border-border text-muted-foreground hover:text-foreground"
+                      : "border-border/40 bg-transparent text-muted-foreground/40 hover:border-border hover:text-muted-foreground"
                   }`}
                 >
-                  {active && (
+                  {isActive && b.status === "running" && (
                     <span className="h-1.5 w-1.5 animate-agent-pulse rounded-full bg-primary" />
                   )}
-                  <span>{`B${i + 1}`}</span>
-                  {!populated && !active && (
-                    <span className="h-1 w-1 rounded-full bg-muted-foreground/30" />
-                  )}
+                  <span>B{i + 1}</span>
                 </button>
               );
             })}
           </div>
-        </ScrollArea>
+        </div>
         <button
-          onClick={() => setLiveStream((v) => !v)}
+          onClick={autoStream ? () => setAutoStream(false) : enableAutoStream}
           className={`flex shrink-0 items-center gap-1.5 rounded border px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-wider transition-all ${
-            liveStream
+            autoStream
               ? "border-primary/50 bg-primary/10 text-primary"
               : "border-border/50 bg-transparent text-muted-foreground hover:border-border hover:text-muted-foreground"
           }`}
-          title={liveStream ? "Live stream locked to latest batch" : "Click to lock to latest batch"}
+          title={autoStream ? "Locked to latest active batch" : "Click to lock to latest active batch"}
         >
-          <FastForward className={`h-3 w-3 ${liveStream ? "animate-pulse" : ""}`} />
-          {liveStream ? "Live" : "Hold"}
+          <FastForward className={`h-3 w-3 ${autoStream ? "animate-pulse" : ""}`} />
+          {autoStream ? "Live" : "Hold"}
         </button>
       </div>
 
@@ -522,25 +508,31 @@ function DeepResearcher({
                 Model thoughts
               </p>
             </div>
-            {!isDone && totalThoughts > 0 && (
+            {active?.status === "running" && totalThoughts > 0 && (
               <span className="h-2 w-2 animate-agent-pulse rounded-full bg-primary" />
             )}
           </div>
           <ScrollArea className="h-[560px]">
-            <div key={`thoughts-${fadeKey}`} className="animate-in fade-in p-4 duration-300">
+            <div
+              ref={thoughtsRef}
+              key={`thoughts-${effectiveIdx}`}
+              className="animate-in fade-in p-4 duration-300"
+            >
               {totalThoughts > 0 ? (
-                <div className="space-y-3">
-                  {batch.thoughts.map((t, i) => (
-                    <p
-                      key={i}
-                      className="text-[13px] leading-relaxed text-foreground/90 first:font-medium"
-                      dangerouslySetInnerHTML={renderThought(t)}
-                    />
+                <div className="space-y-1.5 font-mono text-[12px] leading-relaxed text-foreground/90">
+                  {active!.thoughts.map((t) => (
+                    <span key={t.id} className="inline">
+                      {t.detail}
+                    </span>
                   ))}
-                  {!isDone && (
+                  {active?.status === "running" && (
                     <span className="ml-0.5 inline-block animate-pulse text-primary">▊</span>
                   )}
                 </div>
+              ) : active?.status === "failed" ? (
+                <p className="text-[12px] text-destructive/80">
+                  Section failed. See log tab for error trace.
+                </p>
               ) : (
                 <ThoughtSkeleton count={4} />
               )}
@@ -560,17 +552,24 @@ function DeepResearcher({
             <span className="font-mono text-[10px] text-muted-foreground">{totalQueries}</span>
           </div>
           <ScrollArea className="h-[560px]">
-            <div key={`queries-${fadeKey}`} className="animate-in fade-in p-3 duration-300">
+            <div
+              key={`queries-${effectiveIdx}`}
+              className="animate-in fade-in p-3 duration-300"
+            >
               {totalQueries > 0 ? (
                 <div className="grid gap-1">
-                  {batch.queries.map((q, i) => (
+                  {active!.queries.map((q, i) => (
                     <div
-                      key={i}
+                      key={q.query}
                       className="flex items-center gap-2 rounded border border-border/60 bg-surface/50 px-2.5 py-1.5 text-xs"
                     >
-                      <span className="font-mono text-[9px] text-primary/70">{String(i + 1).padStart(2, "0")}</span>
+                      <span className="font-mono text-[9px] text-primary/70">
+                        {String(i + 1).padStart(2, "0")}
+                      </span>
                       <span className="text-primary">›</span>
-                      <span className="flex-1 truncate font-mono text-[11px] text-foreground/85">{q}</span>
+                      <span className="flex-1 truncate font-mono text-[11px] text-foreground/85">
+                        {q.query}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -593,14 +592,17 @@ function DeepResearcher({
             <span className="font-mono text-[10px] text-muted-foreground">{totalSources}</span>
           </div>
           <ScrollArea className="h-[560px]">
-            <div key={`sources-${fadeKey}`} className="animate-in fade-in p-3 duration-300">
+            <div
+              key={`sources-${effectiveIdx}`}
+              className="animate-in fade-in p-3 duration-300"
+            >
               {totalSources > 0 ? (
                 <div className="grid gap-1.5">
-                  {batch.sources.map((s, i) => (
+                  {active!.sources.map((s) => (
                     <a
-                      key={i}
-                      href={s.url}
-                      target="_blank"
+                      key={s.url}
+                      href={s.url.startsWith("#") ? undefined : s.url}
+                      target={s.url.startsWith("#") ? undefined : "_blank"}
                       rel="noopener noreferrer"
                       className="block rounded-md border border-border/60 bg-surface/40 p-2 transition-colors hover:border-primary/50 hover:bg-surface"
                     >
@@ -611,8 +613,10 @@ function DeepResearcher({
                         </p>
                       </div>
                       <div className="mt-1 flex items-center justify-between font-mono text-[9px] text-muted-foreground">
-                        <span className="truncate">{s.domain}</span>
-                        <span className="shrink-0 text-primary/70">{(s.score * 100).toFixed(0)}%</span>
+                        <span className="truncate">{s.domain || s.url}</span>
+                        <span className="shrink-0 text-primary/70">
+                          {Math.round((s.score || 0) * 100)}%
+                        </span>
                       </div>
                     </a>
                   ))}
@@ -626,12 +630,6 @@ function DeepResearcher({
       </div>
     </div>
   );
-}
-
-// Lightweight inline markdown renderer for **bold** spans in thought text.
-function renderThought(text: string) {
-  const html = text.replace(/\*\*(.+?)\*\*/g, '<strong class="font-semibold text-foreground">$1</strong>');
-  return { __html: html };
 }
 
 function ThoughtSkeleton({ count }: { count: number }) {
