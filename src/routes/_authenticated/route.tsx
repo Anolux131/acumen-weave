@@ -43,53 +43,56 @@ function AuthedLayout() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <aside className="fixed inset-y-0 left-0 hidden w-60 flex-col border-r border-border bg-panel/70 backdrop-blur md:flex">
-        <div className="flex h-16 items-center gap-2.5 border-b border-border px-5">
-          <div className="grid h-8 w-8 place-items-center rounded-md bg-gradient-primary">
-            <Radar className="h-4 w-4 text-primary-foreground" />
-          </div>
-          <div className="leading-tight">
-            <p className="text-sm font-semibold">Anolux</p>
-            <p className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
-              Intelligence
-            </p>
-          </div>
-        </div>
-        <nav className="flex-1 space-y-1 p-3">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-14 flex-col items-center border-r border-border/60 bg-[oklch(0.09_0.015_275)]/90 py-3 backdrop-blur md:flex">
+        <Link
+          to="/dashboard"
+          className="mb-4 grid h-8 w-8 place-items-center rounded-md bg-gradient-primary shadow-[0_0_16px_-4px_oklch(0.62_0.19_275/0.7)]"
+          title="Anolux"
+        >
+          <Radar className="h-4 w-4 text-primary-foreground" />
+        </Link>
+        <nav className="flex flex-col gap-1">
           {nav.map((item) => {
-            const active = pathname === item.to || pathname.startsWith(item.to + "/");
+            const active =
+              item.to === "/dashboard"
+                ? pathname === item.to
+                : pathname === item.to || pathname.startsWith(item.to + "/");
             return (
               <Link
                 key={item.to}
                 to={item.to}
-                className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors ${
+                title={item.label}
+                className={`grid h-9 w-9 place-items-center rounded-md transition-colors ${
                   active
-                    ? "bg-surface text-foreground"
-                    : "text-muted-foreground hover:bg-surface hover:text-foreground"
+                    ? "bg-primary/15 text-primary ring-1 ring-primary/30"
+                    : "text-muted-foreground/70 hover:bg-surface hover:text-foreground"
                 }`}
               >
                 <item.icon className="h-4 w-4" />
-                {item.label}
               </Link>
             );
           })}
         </nav>
-        <div className="border-t border-border p-3">
-          <div className="mb-2 truncate px-2 text-xs text-muted-foreground" title={email}>
-            {email}
+        <div className="mt-auto flex flex-col items-center gap-2">
+          <div
+            className="grid h-8 w-8 place-items-center rounded-full bg-surface text-[10px] font-medium text-muted-foreground"
+            title={email}
+          >
+            {(email || "?").slice(0, 2).toUpperCase()}
           </div>
           <Button
             variant="ghost"
-            size="sm"
-            className="w-full justify-start text-muted-foreground hover:text-foreground"
+            size="icon"
+            className="h-8 w-8 text-muted-foreground/70 hover:text-foreground"
             onClick={handleSignOut}
+            title="Sign out"
           >
-            <LogOut className="mr-2 h-4 w-4" /> Sign out
+            <LogOut className="h-4 w-4" />
           </Button>
         </div>
       </aside>
 
-      <main className="md:pl-60">
+      <main className="md:pl-14">
         <Outlet />
       </main>
     </div>
