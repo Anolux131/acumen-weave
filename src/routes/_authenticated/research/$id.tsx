@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { ArrowLeft, CircleCheck as CheckCircle2, Circle as XCircle, Loader as Loader2, Clock, Radar, Brain, Search, Globe, FileText, Users, Copy, Download, Mail, Linkedin, Star, FastForward, Activity } from "lucide-react";
+import { ArrowLeft, CircleCheck as CheckCircle2, Circle as XCircle, Loader as Loader2, Clock, Radar, Brain, Search, Globe, FileText, Users, Copy, Download, Mail, Linkedin, Star, FastForward, Activity, Zap, Play, ChevronRight } from "lucide-react";
 import { SECTIONS, ACTIVE_SECTION_NUMBERS } from "@/lib/section-config";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
