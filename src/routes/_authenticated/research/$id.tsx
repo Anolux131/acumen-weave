@@ -180,6 +180,18 @@ function ResearchProgress() {
   const fullDossier = reports.find((r) => r.report_type === "full_dossier");
   const execBrief = reports.find((r) => r.report_type === "executive_brief");
 
+  // Auto-advance phase as backend artifacts arrive (user can still click back).
+  useEffect(() => {
+    let latest: 1 | 2 | 3 | 4 = 1;
+    if (deepResearchComplete) latest = 2;
+    if (fullDossier) latest = 3;
+    if (execBrief) latest = 4;
+    if (latest > maxReachedPhase) {
+      setMaxReachedPhase(latest);
+      setPhase(latest);
+    }
+  }, [deepResearchComplete, fullDossier, execBrief, maxReachedPhase]);
+
   // Phase config
   const phases = [
     { id: 1 as const, label: "DEEP RESEARCH & CRAWL" },
