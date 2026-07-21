@@ -604,25 +604,75 @@ function PhaseOneCanvas({
 function PhaseReportCanvas({
   report,
   emptyLabel,
+  companyName,
 }: {
   report: ReportRow | undefined;
   emptyLabel: string;
+  companyName: string;
 }) {
+  const filenameBase = (companyName || "target").toLowerCase().replace(/\s+/g, "-");
+  const downloadMd = () => {
+    if (!report?.markdown_content) return;
+    const blob = new Blob([report.markdown_content], { type: "text/markdown" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${filenameBase}-${report.report_type}.md`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+  const downloadPdf = async () => {
+    if (!report?.markdown_content) return;
+    const { downloadReportAsPdf } = await import("@/lib/pdf-report");
+    downloadReportAsPdf({
+      markdown: report.markdown_content,
+      title: report.title || `${companyName} — Intelligence Report`,
+      subtitle:
+        report.report_type === "executive_brief"
+          ? "Executive Brief"
+          : "Full Intelligence Dossier",
+      filename: `${filenameBase}-${report.report_type}.pdf`,
+    });
+    toast.success("PDF generated");
+  };
+  const copyMd = async () => {
+    if (!report?.markdown_content) return;
+    await navigator.clipboard.writeText(report.markdown_content);
+    toast.success("Markdown copied");
+  };
+
   return (
-    <ScrollArea className="h-[560px]">
-      <div className="p-5">
-        {report?.markdown_content ? (
-          <article className="prose prose-invert prose-sm max-w-none prose-headings:font-semibold prose-h1:text-2xl prose-h1:text-gradient prose-h2:mt-5 prose-h2:text-base prose-strong:text-foreground prose-table:text-xs">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{report.markdown_content}</ReactMarkdown>
-          </article>
-        ) : (
-          <div className="grid place-items-center py-16 text-center">
-            <Loader2 className="h-6 w-6 animate-spin text-primary" />
-            <p className="mt-3 text-sm font-medium text-primary">{emptyLabel}</p>
-          </div>
-        )}
-      </div>
-    </ScrollArea>
+    <div className="flex flex-col">
+      {report?.markdown_content && (
+        <div className="flex flex-wrap items-center justify-end gap-2 border-b border-border/40 px-3 py-2 sm:px-5">
+          <span className="mr-auto font-mono text-[9px] uppercase tracking-widest text-muted-foreground/70">
+            {report.page_count ?? "—"}p • {report.report_type.replace(/_/g, " ")}
+          </span>
+          <Button variant="outline" size="sm" onClick={copyMd}>
+            <Copy className="mr-1.5 h-3.5 w-3.5" /> Copy
+          </Button>
+          <Button variant="outline" size="sm" onClick={downloadMd}>
+            <Download className="mr-1.5 h-3.5 w-3.5" /> .md
+          </Button>
+          <Button size="sm" onClick={downloadPdf}>
+            <Download className="mr-1.5 h-3.5 w-3.5" /> PDF
+          </Button>
+        </div>
+      )}
+      <ScrollArea className="h-[520px] sm:h-[560px]">
+        <div className="p-4 sm:p-5">
+          {report?.markdown_content ? (
+            <article className="prose prose-invert prose-sm max-w-none prose-headings:font-semibold prose-h1:text-2xl prose-h1:text-gradient prose-h2:mt-5 prose-h2:text-base prose-strong:text-foreground prose-table:text-xs">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{report.markdown_content}</ReactMarkdown>
+            </article>
+          ) : (
+            <div className="grid place-items-center py-16 text-center">
+              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              <p className="mt-3 text-sm font-medium text-primary">{emptyLabel}</p>
+            </div>
+          )}
+        </div>
+      </ScrollArea>
+    </div>
   );
 }
 
