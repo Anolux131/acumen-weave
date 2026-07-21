@@ -461,12 +461,14 @@ function ResearchProgress() {
               <PhaseReportCanvas
                 report={fullDossier}
                 emptyLabel="Compiling full intelligence dossier from indexed batches…"
+                companyName={job?.company_name ?? ""}
               />
             )}
             {phase === 3 && (
               <PhaseReportCanvas
                 report={execBrief}
                 emptyLabel="Distilling executive brief from full dossier…"
+                companyName={job?.company_name ?? ""}
               />
             )}
             {phase === 4 && <PhaseOutreachCanvas contacts={contacts} />}
