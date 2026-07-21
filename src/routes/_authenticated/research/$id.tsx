@@ -233,7 +233,7 @@ function ResearchProgress() {
   return (
     <div className="min-h-screen bg-[oklch(0.08_0.012_275)]">
       {/* Workspace header */}
-      <header className="border-b border-border/50 px-6 pt-5 pb-3">
+      <header className="border-b border-border/50 px-4 pt-4 pb-3 sm:px-6 sm:pt-5">
         <div className="mx-auto max-w-[1400px]">
           <Link
             to="/dashboard"
@@ -267,7 +267,7 @@ function ResearchProgress() {
       </header>
 
       {/* Pipeline tracker */}
-      <div className="border-b border-border/50 bg-[oklch(0.07_0.012_275)] px-6 py-4">
+      <div className="border-b border-border/50 bg-[oklch(0.07_0.012_275)] px-4 py-3 sm:px-6 sm:py-4">
         <div className="mx-auto max-w-[1400px]">
           <p className="mb-2 font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground/60">
             Pipeline Tracker: Dynamic Phase Progression
@@ -317,8 +317,8 @@ function ResearchProgress() {
       </div>
 
       {/* Main workspace grid */}
-      <div className="mx-auto max-w-[1400px] p-6">
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,38fr)_minmax(0,62fr)]">
+      <div className="mx-auto max-w-[1400px] p-3 sm:p-6">
+        <div className="grid gap-4 md:grid-cols-[minmax(0,38fr)_minmax(0,62fr)]">
           {/* LEFT column */}
           <div className="flex flex-col gap-4">
             {/* Target info node */}
@@ -565,7 +565,7 @@ function PhaseOneCanvas({
             {resolvedSources.length}
           </span>
         </div>
-        <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-1.5 xs:grid-cols-2 sm:grid-cols-2 lg:grid-cols-3">
           {resolvedSources.length === 0
             ? Array.from({ length: 6 }).map((_, i) => (
                 <div
