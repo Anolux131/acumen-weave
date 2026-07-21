@@ -106,12 +106,7 @@ function ResearchProgress() {
 
   // ---- Pipeline phase (UI state; advances on user handoff) ----
   const [phase, setPhase] = useState<1 | 2 | 3 | 4>(1);
-  useEffect(() => {
-    // if this job is fully done and we have reports, auto-hint that user can advance
-    if (deepResearchComplete && phase === 1) {
-      // stay on 1 until user clicks Proceed
-    }
-  }, [deepResearchComplete, phase]);
+  const [maxReachedPhase, setMaxReachedPhase] = useState<1 | 2 | 3 | 4>(1);
 
   // ---- Derived data for right canvas ----
   const domain = useMemo(() => {
