@@ -272,23 +272,24 @@ function ResearchProgress() {
           <p className="mb-2 font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground/60">
             Pipeline Tracker: Dynamic Phase Progression
           </p>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex snap-x flex-nowrap items-center gap-2 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible">
             {phases.map((p, i) => {
               const isActive = phase === p.id;
-              const isPast = phase > p.id;
-              const clickable = p.id <= phase || (p.id === phase + 1 && canProceed);
+              const isPast = maxReachedPhase > p.id;
+              const clickable = p.id <= maxReachedPhase;
               return (
                 <button
                   key={p.id}
                   disabled={!clickable}
                   onClick={() => setPhase(p.id)}
-                  className={`group relative flex items-center gap-2 rounded-full border px-4 py-2 font-mono text-[11px] tracking-wide transition-all ${
+                  className={`group relative flex shrink-0 snap-start items-center gap-2 rounded-full border px-3 py-2 font-mono text-[10px] tracking-wide transition-all sm:px-4 sm:text-[11px] ${
                     isActive
                       ? "border-primary/60 bg-gradient-to-r from-primary/25 to-secondary/20 text-foreground shadow-[0_0_18px_-2px_oklch(0.62_0.19_275/0.6)] ring-1 ring-primary/40"
                       : isPast
                         ? "border-success/30 bg-success/5 text-success/80"
                         : "border-border/60 bg-transparent text-muted-foreground/60"
-                  } ${!clickable ? "cursor-not-allowed opacity-70" : "hover:text-foreground"}`}
+                  } ${!clickable ? "cursor-not-allowed opacity-60" : "hover:text-foreground"}`}
+                  title={!clickable ? "Awaiting backend completion" : ""}
                 >
                   {isActive ? (
                     <span className="relative flex h-2 w-2 items-center justify-center">
@@ -297,10 +298,12 @@ function ResearchProgress() {
                     </span>
                   ) : isPast ? (
                     <CheckCircle2 className="h-3 w-3" />
-                  ) : (
+                  ) : clickable ? (
                     <Play className="h-2.5 w-2.5 opacity-60" />
+                  ) : (
+                    <Loader2 className="h-2.5 w-2.5 animate-spin opacity-60" />
                   )}
-                  <span className="font-semibold">
+                  <span className="font-semibold whitespace-nowrap">
                     {p.id}. {p.label}
                   </span>
                   {i < phases.length - 1 && (
