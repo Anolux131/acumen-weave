@@ -565,7 +565,7 @@ function PhaseOneCanvas({
             {resolvedSources.length}
           </span>
         </div>
-        <div className="grid grid-cols-1 gap-1.5 xs:grid-cols-2 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-2 gap-1.5 lg:grid-cols-3">
           {resolvedSources.length === 0
             ? Array.from({ length: 6 }).map((_, i) => (
                 <div
