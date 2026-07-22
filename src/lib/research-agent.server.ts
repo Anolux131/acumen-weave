@@ -558,11 +558,18 @@ Analyze the above data and produce Section ${section.number}: ${section.name}. F
         key_findings: findings,
         confidence_score: confidence,
         data_sources: topResults.map((r) => ({ url: r.url, title: r.title })),
-        search_queries_used: queries,
+        search_queries_used: [...queries, ...followupQueries],
         pages_scraped: successful.length,
         tokens_used: tokens,
         processing_time_ms: Date.now() - t0,
-        raw_research: { searchCount: uniqueByUrl.length, scrapeCount: successful.length },
+        raw_research: {
+          primaryQueries: queries.length,
+          followupQueries: followupQueries.length,
+          searchCount: uniqueByUrl.length,
+          scrapeCount: successful.length,
+          gap: { satisfied: gap.satisfied, reasoning: gap.reasoning },
+          emphasis,
+        },
       })
       .eq("job_id", opts.jobId)
       .eq("section_number", opts.sectionNumber);
