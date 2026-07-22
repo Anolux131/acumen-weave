@@ -873,19 +873,38 @@ export async function runResearchJob(jobId: string): Promise<void> {
     throw e;
   }
 
+  // Planning phase — must happen before any searches so per-section
+  // query generators can inherit angles and overlooked topics.
+  await db
+    .from("research_jobs")
+    .update({
+      status: "planning",
+      current_phase: "Building research plan",
+      progress_percentage: 2,
+      total_sections: allSections.length,
+    })
+    .eq("id", jobId);
+  const plan = await planResearch({
+    jobId,
+    companyName: job.company_name,
+    companyUrl: job.company_url ?? undefined,
+    industry: job.industry ?? undefined,
+    provider,
+  });
+
   await db
     .from("research_jobs")
     .update({
       status: "researching",
       current_phase: `Deploying ${researchSections.length} research agents`,
-      progress_percentage: 3,
-      total_sections: allSections.length,
+      progress_percentage: 4,
     })
     .eq("id", jobId);
   await log(jobId, "Orchestrator", "status", "Launching agents", `${researchSections.length} research + ${synthesisSections.length} synthesis`, { sections: allSections }, "started");
 
-  // Wave 1: research sections (1–13), throttled in waves of 5
-  const WAVE = 5;
+  // Wave 1: research sections — smaller waves because each section now
+  // fires ~40 queries and streams AI thoughts.
+  const WAVE = 3;
   for (let i = 0; i < researchSections.length; i += WAVE) {
     const wave = researchSections.slice(i, i + WAVE);
     await Promise.all(
@@ -898,10 +917,12 @@ export async function runResearchJob(jobId: string): Promise<void> {
           companyUrl: job.company_url ?? undefined,
           industry: job.industry ?? undefined,
           provider,
+          plan,
         }),
       ),
     );
   }
+
 
   // Wave 2: synthesis (14)
   await db.from("research_jobs").update({ current_phase: "Synthesizing", progress_percentage: 92 }).eq("id", jobId);
