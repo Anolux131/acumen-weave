@@ -43,26 +43,80 @@ async function log(
   }
 }
 
-async function tavilySearch(query: string): Promise<TavilyResult[]> {
+async function tavilySearch(query: string, maxResults = 5): Promise<TavilyResult[]> {
   const key = process.env.TAVILY_API_KEY;
   if (!key) throw new Error("TAVILY_API_KEY missing");
-  const res = await fetch(TAVILY_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      api_key: key,
-      query,
-      search_depth: "advanced",
-      include_raw_content: false,
-      max_results: 6,
-    }),
-  });
-  if (!res.ok) {
-    console.error("tavily error", res.status, await res.text());
+  try {
+    const res = await fetch(TAVILY_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        api_key: key,
+        query,
+        search_depth: "basic",
+        include_raw_content: false,
+        max_results: maxResults,
+      }),
+    });
+    if (!res.ok) {
+      console.error("tavily error", res.status, (await res.text()).slice(0, 200));
+      return [];
+    }
+    const j = await res.json();
+    return (j.results ?? []) as TavilyResult[];
+  } catch (e) {
+    console.error("tavily fetch failed", e);
     return [];
   }
+}
+
+// Simple concurrency-limited map
+async function pMap<T, R>(items: T[], limit: number, fn: (t: T, i: number) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let cursor = 0;
+  async function worker() {
+    while (true) {
+      const i = cursor++;
+      if (i >= items.length) return;
+      out[i] = await fn(items[i], i);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => worker()));
+  return out;
+}
+
+/** Non-streaming JSON-ish AI call. Used for planning & query generation. */
+async function aiComplete(provider: ProviderConfig, system: string, user: string, maxTokens = 1400): Promise<string> {
+  const res = await fetch(provider.endpoint, {
+    method: "POST",
+    headers: provider.headers,
+    body: JSON.stringify({
+      model: provider.model,
+      stream: false,
+      max_tokens: maxTokens,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+    }),
+  });
+  if (!res.ok) throw new Error(`${provider.provider} ${res.status}: ${(await res.text()).slice(0, 300)}`);
   const j = await res.json();
-  return (j.results ?? []) as TavilyResult[];
+  return (j?.choices?.[0]?.message?.content ?? "").trim();
+}
+
+function parseJsonLoose<T>(raw: string, fallback: T): T {
+  if (!raw) return fallback;
+  // Strip ``` fences
+  const cleaned = raw.replace(/```json\s*|```/gi, "").trim();
+  const firstBrace = cleaned.search(/[\[{]/);
+  const lastBrace = Math.max(cleaned.lastIndexOf("]"), cleaned.lastIndexOf("}"));
+  if (firstBrace === -1 || lastBrace === -1) return fallback;
+  try {
+    return JSON.parse(cleaned.slice(firstBrace, lastBrace + 1)) as T;
+  } catch {
+    return fallback;
+  }
 }
 
 async function firecrawlScrape(url: string): Promise<ScrapeResult> {
@@ -180,7 +234,162 @@ function normalizeUrl(url?: string | null): string | undefined {
   return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
 }
 
+export type ResearchPlan = {
+  summary: string;
+  angles: string[];
+  overlooked: string[];
+  section_briefs: Record<string, string>;
+};
+
+/**
+ * Ask the AI to build a research plan BEFORE any searches run. The plan
+ * covers: overall angle for this target, per-section emphasis, and
+ * "overlooked" topics the user didn't mention but matter.
+ */
+export async function planResearch(opts: {
+  jobId: string;
+  companyName: string;
+  companyUrl?: string;
+  industry?: string;
+  provider: ProviderConfig;
+}): Promise<ResearchPlan> {
+  const sectionsBrief = ACTIVE_SECTION_NUMBERS.filter((n) => !getSection(n).synthesis)
+    .map((n) => {
+      const s = getSection(n);
+      return `${n}. ${s.name} — ${s.focus}`;
+    })
+    .join("\n");
+
+  const system = `You are the Chief Research Strategist for ANOLUX Intelligence Engine.
+You produce a research plan BEFORE any web queries fire. Output STRICT JSON only, no prose.`;
+
+  const user = `Target company: ${opts.companyName}
+Website: ${opts.companyUrl ?? "unknown"}
+Industry: ${opts.industry ?? "unspecified — infer"}
+
+Sections that will be researched:
+${sectionsBrief}
+
+Produce a JSON object with keys:
+{
+  "summary": "1–2 sentence framing of what this target is and why they matter",
+  "angles": ["5–8 concrete investigative angles a smart analyst would pursue"],
+  "overlooked": ["5–8 topics the user likely did NOT emphasize but that would materially change conclusions"],
+  "section_briefs": { "1": "one-line emphasis", ... one entry per section number listed above }
+}
+Return JSON only.`;
+
+  let parsed: ResearchPlan;
+  try {
+    const raw = await aiComplete(opts.provider, system, user, 1800);
+    parsed = parseJsonLoose<ResearchPlan>(raw, {
+      summary: `Deep-research plan for ${opts.companyName}`,
+      angles: [],
+      overlooked: [],
+      section_briefs: {},
+    });
+  } catch (e) {
+    parsed = {
+      summary: `Deep-research plan for ${opts.companyName} (planner fallback: ${e instanceof Error ? e.message : String(e)})`,
+      angles: [],
+      overlooked: [],
+      section_briefs: {},
+    };
+  }
+
+  await log(opts.jobId, "Chief Strategist", "thought", "Research plan", parsed.summary, { plan: parsed, phase: "planning" }, "done");
+  for (const a of parsed.angles.slice(0, 10)) {
+    await log(opts.jobId, "Chief Strategist", "thought", "Investigative angle", a, { phase: "planning" });
+  }
+  for (const o of parsed.overlooked.slice(0, 10)) {
+    await log(opts.jobId, "Chief Strategist", "thought", "Overlooked angle", o, { phase: "planning" });
+  }
+  return parsed;
+}
+
+/** Generate 40+ dynamic queries for a section via AI (with fallbacks). */
+async function generateSectionQueries(opts: {
+  companyName: string;
+  companyUrl?: string;
+  industry?: string;
+  section: ReturnType<typeof getSection>;
+  plan: ResearchPlan;
+  provider: ProviderConfig;
+  target: number;
+}): Promise<string[]> {
+  const briefKey = String(opts.section.number);
+  const emphasis = opts.plan.section_briefs?.[briefKey] ?? opts.section.focus;
+  const system = `You generate diverse, high-signal web search queries for a B2B intelligence agent.
+Return STRICT JSON array of strings. Each query 5–14 words, mixing quoted names, operators
+(site:, filetype:, "vs", "review", "pricing", years). Cover primary facts, second-order effects,
+competitor comparisons, customer voice, regulatory/legal, hiring/leadership, financial signals,
+negative press. No duplicates.`;
+
+  const user = `Target: ${opts.companyName} (${opts.companyUrl ?? "no website"}, industry: ${opts.industry ?? "unspecified"})
+Section ${opts.section.number}: ${opts.section.name}
+Emphasis: ${emphasis}
+Overlooked angles: ${opts.plan.overlooked.slice(0, 6).join(" | ") || "n/a"}
+
+Return a JSON array of exactly ${opts.target} distinct search queries. JSON only.`;
+
+  let generated: string[] = [];
+  try {
+    const raw = await aiComplete(opts.provider, system, user, 2200);
+    const parsed = parseJsonLoose<string[]>(raw, []);
+    generated = parsed
+      .filter((q): q is string => typeof q === "string")
+      .map((q) => q.trim())
+      .filter((q) => q.length > 4 && q.length < 240);
+  } catch {
+    generated = [];
+  }
+
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const q of generated) {
+    const key = q.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(q);
+  }
+  if (out.length < 12) {
+    const fallback = opts.section.searchTemplates({
+      company: opts.companyName,
+      url: normalizeUrl(opts.companyUrl),
+      industry: opts.industry,
+    });
+    for (const q of fallback) if (!seen.has(q.toLowerCase())) { seen.add(q.toLowerCase()); out.push(q); }
+  }
+  return out.slice(0, opts.target);
+}
+
+/** After the initial pass, ask the model what's still missing. */
+async function findResearchGaps(opts: {
+  section: ReturnType<typeof getSection>;
+  companyName: string;
+  snippets: string;
+  provider: ProviderConfig;
+}): Promise<{ satisfied: boolean; followups: string[]; reasoning: string }> {
+  const system = `You audit whether collected search snippets are sufficient to write a rigorous
+intelligence section. Output STRICT JSON: {"satisfied": boolean, "reasoning": "1-3 sentences",
+"followups": ["additional search queries to fill gaps, 0–12 items"]}. If satisfied, followups=[].`;
+  const user = `Section ${opts.section.number}: ${opts.section.name} (focus: ${opts.section.focus})
+Target: ${opts.companyName}
+
+Collected snippets (truncated):
+${opts.snippets.slice(0, 8000)}
+
+Return JSON only.`;
+  try {
+    const raw = await aiComplete(opts.provider, system, user, 900);
+    return parseJsonLoose(raw, { satisfied: true, followups: [], reasoning: "" });
+  } catch {
+    return { satisfied: true, followups: [], reasoning: "gap-check skipped" };
+  }
+}
+
 export async function runSection(opts: {
+
   jobId: string;
   userId: string;
   sectionNumber: number;
@@ -188,11 +397,18 @@ export async function runSection(opts: {
   companyUrl?: string;
   industry?: string;
   provider: ProviderConfig;
+  plan: ResearchPlan;
+  queryTarget?: number;
+  followupTarget?: number;
+  searchConcurrency?: number;
 }): Promise<void> {
   const t0 = Date.now();
   const db = admin();
   const section = getSection(opts.sectionNumber);
   const agent = `${section.shortName} Agent`;
+  const QUERY_TARGET = opts.queryTarget ?? 40;
+  const FOLLOWUP_TARGET = opts.followupTarget ?? 12;
+  const CONCURRENCY = opts.searchConcurrency ?? 6;
 
   await db
     .from("section_results")
@@ -219,28 +435,75 @@ export async function runSection(opts: {
 
   try {
     const url = normalizeUrl(opts.companyUrl);
-    const queries = section.searchTemplates({ company: opts.companyName, url, industry: opts.industry }).slice(0, 6);
 
-    // 1. Search
-    const allResults: TavilyResult[] = [];
-    await Promise.all(
-      queries.map(async (q) => {
-        await slog("query", "Search", q, { query: q });
-        const rs = await tavilySearch(q);
-        allResults.push(...rs);
-        for (const r of rs.slice(0, 3)) {
+    // 0. Plan: emphasis for this section
+    const emphasis = opts.plan.section_briefs?.[String(opts.sectionNumber)] ?? section.focus;
+    await slog("thought", "Section brief", emphasis, { phase: "planning" });
+
+    // 1. Dynamic query generation (target 40)
+    await slog("status", `Generating ${QUERY_TARGET} dynamic queries`);
+    const queries = await generateSectionQueries({
+      companyName: opts.companyName,
+      companyUrl: opts.companyUrl,
+      industry: opts.industry,
+      section,
+      plan: opts.plan,
+      provider: opts.provider,
+      target: QUERY_TARGET,
+    });
+    await slog("status", `Query plan ready`, `${queries.length} queries queued`, { count: queries.length });
+
+    // 2. Execute batch 1 — throttled concurrency
+    const runBatch = async (batchLabel: string, batch: string[]) => {
+      const results: TavilyResult[] = [];
+      await pMap(batch, CONCURRENCY, async (q) => {
+        await slog("query", `Search (${batchLabel})`, q, { query: q, batch: batchLabel });
+        const rs = await tavilySearch(q, 5);
+        results.push(...rs);
+        for (const r of rs.slice(0, 2)) {
           await slog("source", "Source", r.title, {
             url: r.url,
             title: r.title,
             snippet: (r.content ?? "").slice(0, 320),
             score: r.score,
             query: q,
+            batch: batchLabel,
           });
         }
-      }),
-    );
+      });
+      return results;
+    };
+
+    const primary = await runBatch("primary", queries);
+    let allResults: TavilyResult[] = [...primary];
+
+    // 3. Gap analysis + follow-up batch
+    const uniquePrimary = Array.from(new Map(primary.map((r) => [r.url, r])).values());
+    const snippetsForGap = uniquePrimary
+      .slice(0, 30)
+      .map((r) => `- [${r.title}](${r.url})\n  ${(r.content ?? "").slice(0, 240)}`)
+      .join("\n");
+
+    await slog("status", "Reasoning over collected evidence");
+    const gap = await findResearchGaps({
+      section,
+      companyName: opts.companyName,
+      snippets: snippetsForGap,
+      provider: opts.provider,
+    });
+    await slog("thought", "Gap analysis", gap.reasoning || (gap.satisfied ? "Coverage sufficient" : "Coverage incomplete"), { satisfied: gap.satisfied, followups: gap.followups.length });
+
+    let followupQueries: string[] = [];
+    if (!gap.satisfied && gap.followups.length > 0) {
+      followupQueries = gap.followups.slice(0, FOLLOWUP_TARGET);
+      await slog("status", `Firing ${followupQueries.length} follow-up queries`);
+      const followupResults = await runBatch("followup", followupQueries);
+      allResults = [...allResults, ...followupResults];
+    }
+
     const uniqueByUrl = Array.from(new Map(allResults.map((r) => [r.url, r])).values());
-    const topResults = uniqueByUrl.sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, 8);
+    const topResults = uniqueByUrl.sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, 10);
+
 
     // 2. Scrape
     const companySiteScrapes: string[] = [];
@@ -295,11 +558,18 @@ Analyze the above data and produce Section ${section.number}: ${section.name}. F
         key_findings: findings,
         confidence_score: confidence,
         data_sources: topResults.map((r) => ({ url: r.url, title: r.title })),
-        search_queries_used: queries,
+        search_queries_used: [...queries, ...followupQueries],
         pages_scraped: successful.length,
         tokens_used: tokens,
         processing_time_ms: Date.now() - t0,
-        raw_research: { searchCount: uniqueByUrl.length, scrapeCount: successful.length },
+        raw_research: {
+          primaryQueries: queries.length,
+          followupQueries: followupQueries.length,
+          searchCount: uniqueByUrl.length,
+          scrapeCount: successful.length,
+          gap: { satisfied: gap.satisfied, reasoning: gap.reasoning },
+          emphasis,
+        },
       })
       .eq("job_id", opts.jobId)
       .eq("section_number", opts.sectionNumber);
@@ -603,19 +873,38 @@ export async function runResearchJob(jobId: string): Promise<void> {
     throw e;
   }
 
+  // Planning phase — must happen before any searches so per-section
+  // query generators can inherit angles and overlooked topics.
+  await db
+    .from("research_jobs")
+    .update({
+      status: "planning",
+      current_phase: "Building research plan",
+      progress_percentage: 2,
+      total_sections: allSections.length,
+    })
+    .eq("id", jobId);
+  const plan = await planResearch({
+    jobId,
+    companyName: job.company_name,
+    companyUrl: job.company_url ?? undefined,
+    industry: job.industry ?? undefined,
+    provider,
+  });
+
   await db
     .from("research_jobs")
     .update({
       status: "researching",
       current_phase: `Deploying ${researchSections.length} research agents`,
-      progress_percentage: 3,
-      total_sections: allSections.length,
+      progress_percentage: 4,
     })
     .eq("id", jobId);
   await log(jobId, "Orchestrator", "status", "Launching agents", `${researchSections.length} research + ${synthesisSections.length} synthesis`, { sections: allSections }, "started");
 
-  // Wave 1: research sections (1–13), throttled in waves of 5
-  const WAVE = 5;
+  // Wave 1: research sections — smaller waves because each section now
+  // fires ~40 queries and streams AI thoughts.
+  const WAVE = 3;
   for (let i = 0; i < researchSections.length; i += WAVE) {
     const wave = researchSections.slice(i, i + WAVE);
     await Promise.all(
@@ -628,10 +917,12 @@ export async function runResearchJob(jobId: string): Promise<void> {
           companyUrl: job.company_url ?? undefined,
           industry: job.industry ?? undefined,
           provider,
+          plan,
         }),
       ),
     );
   }
+
 
   // Wave 2: synthesis (14)
   await db.from("research_jobs").update({ current_phase: "Synthesizing", progress_percentage: 92 }).eq("id", jobId);

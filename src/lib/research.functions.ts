@@ -1,5 +1,4 @@
 import { createServerFn } from "@tanstack/react-start";
-import { getRequest } from "@tanstack/react-start/server";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
 import { SECTIONS, ACTIVE_SECTION_NUMBERS } from "./section-config";
@@ -12,8 +11,13 @@ const CreateJobInput = z.object({
 });
 
 /**
- * Create a research job and trigger the background orchestrator.
- * Returns the new job id immediately; the client subscribes to realtime for progress.
+ * Create a research job and hand the orchestrator to Cloudflare's
+ * ctx.waitUntil so it survives past this request's response.
+ *
+ * Previously this fire-and-forgot a fetch() to /api/public/orchestrate,
+ * but workerd cancels any un-awaited subrequest the moment the outer
+ * handler returns — so the orchestrator never actually started and jobs
+ * sat in "planning" forever.
  */
 export const createResearchJob = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -37,8 +41,6 @@ export const createResearchJob = createServerFn({ method: "POST" })
       .single();
     if (error || !job) throw new Error(error?.message ?? "Failed to create job");
 
-    // Pre-create one section_results row per active section so the UI can render
-    // the full grid immediately.
     const sectionRows = ACTIVE_SECTION_NUMBERS.map((n) => {
       const meta = SECTIONS.find((s) => s.number === n)!;
       return {
@@ -51,16 +53,37 @@ export const createResearchJob = createServerFn({ method: "POST" })
     });
     await supabase.from("section_results").insert(sectionRows);
 
-    // Fire-and-forget kick to a public API route: a separate Worker
-    // invocation that outlives this request, since floating promises inside
-    // this handler would be cancelled when the response finalizes.
-    const appOrigin = new URL(getRequest().url).origin;
-    const token = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
-    void fetch(`${appOrigin}/api/public/orchestrate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ job_id: job.id, token }),
-    }).catch((err) => console.error("[research.functions] orchestrator kick failed:", err));
+    // Hand the orchestrator to ctx.waitUntil so it runs past this response.
+    const [{ runResearchJob }, { getExecutionCtx }] = await Promise.all([
+      import("./research-agent.server"),
+      import("../server"),
+    ]);
+    const jobId = job.id;
+    const kicked = runResearchJob(jobId).catch(async (err) => {
+      console.error(`[orchestrator] Job ${jobId} crashed:`, err);
+      try {
+        const { createClient } = await import("@supabase/supabase-js");
+        const admin = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
+          auth: { persistSession: false, autoRefreshToken: false },
+        });
+        await admin
+          .from("research_jobs")
+          .update({
+            status: "failed",
+            current_phase: "Orchestrator crashed",
+            error_message: err instanceof Error ? err.message : String(err),
+          })
+          .eq("id", jobId);
+      } catch {
+        /* swallow */
+      }
+    });
+    const ctx = getExecutionCtx();
+    if (ctx?.waitUntil) {
+      ctx.waitUntil(kicked);
+    } else {
+      void kicked;
+    }
 
     return { job_id: job.id };
   });

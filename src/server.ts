@@ -7,6 +7,18 @@ type ServerEntry = {
   fetch: (request: Request, env: unknown, ctx: unknown) => Promise<Response> | Response;
 };
 
+type ExecCtx = { waitUntil?: (p: Promise<unknown>) => void };
+
+// Latest Cloudflare execution context, captured on every fetch invocation.
+// Server functions read it via getExecutionCtx() so long-running background
+// work (e.g. the research orchestrator) can be handed to ctx.waitUntil and
+// survive after the outer response has been sent. Without this, workerd
+// cancels any un-awaited fetch/promise as soon as the handler returns.
+let currentCtx: ExecCtx | undefined;
+export function getExecutionCtx(): ExecCtx | undefined {
+  return currentCtx;
+}
+
 let serverEntryPromise: Promise<ServerEntry> | undefined;
 
 async function getServerEntry(): Promise<ServerEntry> {
@@ -46,6 +58,7 @@ function isH3SwallowedErrorBody(body: string): boolean {
 
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
+    currentCtx = ctx as ExecCtx;
     try {
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
