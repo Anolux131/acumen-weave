@@ -43,26 +43,80 @@ async function log(
   }
 }
 
-async function tavilySearch(query: string): Promise<TavilyResult[]> {
+async function tavilySearch(query: string, maxResults = 5): Promise<TavilyResult[]> {
   const key = process.env.TAVILY_API_KEY;
   if (!key) throw new Error("TAVILY_API_KEY missing");
-  const res = await fetch(TAVILY_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      api_key: key,
-      query,
-      search_depth: "advanced",
-      include_raw_content: false,
-      max_results: 6,
-    }),
-  });
-  if (!res.ok) {
-    console.error("tavily error", res.status, await res.text());
+  try {
+    const res = await fetch(TAVILY_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        api_key: key,
+        query,
+        search_depth: "basic",
+        include_raw_content: false,
+        max_results: maxResults,
+      }),
+    });
+    if (!res.ok) {
+      console.error("tavily error", res.status, (await res.text()).slice(0, 200));
+      return [];
+    }
+    const j = await res.json();
+    return (j.results ?? []) as TavilyResult[];
+  } catch (e) {
+    console.error("tavily fetch failed", e);
     return [];
   }
+}
+
+// Simple concurrency-limited map
+async function pMap<T, R>(items: T[], limit: number, fn: (t: T, i: number) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let cursor = 0;
+  async function worker() {
+    while (true) {
+      const i = cursor++;
+      if (i >= items.length) return;
+      out[i] = await fn(items[i], i);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => worker()));
+  return out;
+}
+
+/** Non-streaming JSON-ish AI call. Used for planning & query generation. */
+async function aiComplete(provider: ProviderConfig, system: string, user: string, maxTokens = 1400): Promise<string> {
+  const res = await fetch(provider.endpoint, {
+    method: "POST",
+    headers: provider.headers,
+    body: JSON.stringify({
+      model: provider.model,
+      stream: false,
+      max_tokens: maxTokens,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+    }),
+  });
+  if (!res.ok) throw new Error(`${provider.provider} ${res.status}: ${(await res.text()).slice(0, 300)}`);
   const j = await res.json();
-  return (j.results ?? []) as TavilyResult[];
+  return (j?.choices?.[0]?.message?.content ?? "").trim();
+}
+
+function parseJsonLoose<T>(raw: string, fallback: T): T {
+  if (!raw) return fallback;
+  // Strip ``` fences
+  const cleaned = raw.replace(/```json\s*|```/gi, "").trim();
+  const firstBrace = cleaned.search(/[\[{]/);
+  const lastBrace = Math.max(cleaned.lastIndexOf("]"), cleaned.lastIndexOf("}"));
+  if (firstBrace === -1 || lastBrace === -1) return fallback;
+  try {
+    return JSON.parse(cleaned.slice(firstBrace, lastBrace + 1)) as T;
+  } catch {
+    return fallback;
+  }
 }
 
 async function firecrawlScrape(url: string): Promise<ScrapeResult> {
