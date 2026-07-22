@@ -397,11 +397,18 @@ export async function runSection(opts: {
   companyUrl?: string;
   industry?: string;
   provider: ProviderConfig;
+  plan: ResearchPlan;
+  queryTarget?: number;
+  followupTarget?: number;
+  searchConcurrency?: number;
 }): Promise<void> {
   const t0 = Date.now();
   const db = admin();
   const section = getSection(opts.sectionNumber);
   const agent = `${section.shortName} Agent`;
+  const QUERY_TARGET = opts.queryTarget ?? 40;
+  const FOLLOWUP_TARGET = opts.followupTarget ?? 12;
+  const CONCURRENCY = opts.searchConcurrency ?? 6;
 
   await db
     .from("section_results")
@@ -428,28 +435,75 @@ export async function runSection(opts: {
 
   try {
     const url = normalizeUrl(opts.companyUrl);
-    const queries = section.searchTemplates({ company: opts.companyName, url, industry: opts.industry }).slice(0, 6);
 
-    // 1. Search
-    const allResults: TavilyResult[] = [];
-    await Promise.all(
-      queries.map(async (q) => {
-        await slog("query", "Search", q, { query: q });
-        const rs = await tavilySearch(q);
-        allResults.push(...rs);
-        for (const r of rs.slice(0, 3)) {
+    // 0. Plan: emphasis for this section
+    const emphasis = opts.plan.section_briefs?.[String(opts.sectionNumber)] ?? section.focus;
+    await slog("thought", "Section brief", emphasis, { phase: "planning" });
+
+    // 1. Dynamic query generation (target 40)
+    await slog("status", `Generating ${QUERY_TARGET} dynamic queries`);
+    const queries = await generateSectionQueries({
+      companyName: opts.companyName,
+      companyUrl: opts.companyUrl,
+      industry: opts.industry,
+      section,
+      plan: opts.plan,
+      provider: opts.provider,
+      target: QUERY_TARGET,
+    });
+    await slog("status", `Query plan ready`, `${queries.length} queries queued`, { count: queries.length });
+
+    // 2. Execute batch 1 — throttled concurrency
+    const runBatch = async (batchLabel: string, batch: string[]) => {
+      const results: TavilyResult[] = [];
+      await pMap(batch, CONCURRENCY, async (q) => {
+        await slog("query", `Search (${batchLabel})`, q, { query: q, batch: batchLabel });
+        const rs = await tavilySearch(q, 5);
+        results.push(...rs);
+        for (const r of rs.slice(0, 2)) {
           await slog("source", "Source", r.title, {
             url: r.url,
             title: r.title,
             snippet: (r.content ?? "").slice(0, 320),
             score: r.score,
             query: q,
+            batch: batchLabel,
           });
         }
-      }),
-    );
+      });
+      return results;
+    };
+
+    const primary = await runBatch("primary", queries);
+    let allResults: TavilyResult[] = [...primary];
+
+    // 3. Gap analysis + follow-up batch
+    const uniquePrimary = Array.from(new Map(primary.map((r) => [r.url, r])).values());
+    const snippetsForGap = uniquePrimary
+      .slice(0, 30)
+      .map((r) => `- [${r.title}](${r.url})\n  ${(r.content ?? "").slice(0, 240)}`)
+      .join("\n");
+
+    await slog("status", "Reasoning over collected evidence");
+    const gap = await findResearchGaps({
+      section,
+      companyName: opts.companyName,
+      snippets: snippetsForGap,
+      provider: opts.provider,
+    });
+    await slog("thought", "Gap analysis", gap.reasoning || (gap.satisfied ? "Coverage sufficient" : "Coverage incomplete"), { satisfied: gap.satisfied, followups: gap.followups.length });
+
+    let followupQueries: string[] = [];
+    if (!gap.satisfied && gap.followups.length > 0) {
+      followupQueries = gap.followups.slice(0, FOLLOWUP_TARGET);
+      await slog("status", `Firing ${followupQueries.length} follow-up queries`);
+      const followupResults = await runBatch("followup", followupQueries);
+      allResults = [...allResults, ...followupResults];
+    }
+
     const uniqueByUrl = Array.from(new Map(allResults.map((r) => [r.url, r])).values());
-    const topResults = uniqueByUrl.sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, 8);
+    const topResults = uniqueByUrl.sort((a, b) => (b.score ?? 0) - (a.score ?? 0)).slice(0, 10);
+
 
     // 2. Scrape
     const companySiteScrapes: string[] = [];
