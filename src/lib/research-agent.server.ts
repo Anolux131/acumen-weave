@@ -234,7 +234,162 @@ function normalizeUrl(url?: string | null): string | undefined {
   return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
 }
 
+export type ResearchPlan = {
+  summary: string;
+  angles: string[];
+  overlooked: string[];
+  section_briefs: Record<string, string>;
+};
+
+/**
+ * Ask the AI to build a research plan BEFORE any searches run. The plan
+ * covers: overall angle for this target, per-section emphasis, and
+ * "overlooked" topics the user didn't mention but matter.
+ */
+export async function planResearch(opts: {
+  jobId: string;
+  companyName: string;
+  companyUrl?: string;
+  industry?: string;
+  provider: ProviderConfig;
+}): Promise<ResearchPlan> {
+  const sectionsBrief = ACTIVE_SECTION_NUMBERS.filter((n) => !getSection(n).synthesis)
+    .map((n) => {
+      const s = getSection(n);
+      return `${n}. ${s.name} — ${s.focus}`;
+    })
+    .join("\n");
+
+  const system = `You are the Chief Research Strategist for ANOLUX Intelligence Engine.
+You produce a research plan BEFORE any web queries fire. Output STRICT JSON only, no prose.`;
+
+  const user = `Target company: ${opts.companyName}
+Website: ${opts.companyUrl ?? "unknown"}
+Industry: ${opts.industry ?? "unspecified — infer"}
+
+Sections that will be researched:
+${sectionsBrief}
+
+Produce a JSON object with keys:
+{
+  "summary": "1–2 sentence framing of what this target is and why they matter",
+  "angles": ["5–8 concrete investigative angles a smart analyst would pursue"],
+  "overlooked": ["5–8 topics the user likely did NOT emphasize but that would materially change conclusions"],
+  "section_briefs": { "1": "one-line emphasis", ... one entry per section number listed above }
+}
+Return JSON only.`;
+
+  let parsed: ResearchPlan;
+  try {
+    const raw = await aiComplete(opts.provider, system, user, 1800);
+    parsed = parseJsonLoose<ResearchPlan>(raw, {
+      summary: `Deep-research plan for ${opts.companyName}`,
+      angles: [],
+      overlooked: [],
+      section_briefs: {},
+    });
+  } catch (e) {
+    parsed = {
+      summary: `Deep-research plan for ${opts.companyName} (planner fallback: ${e instanceof Error ? e.message : String(e)})`,
+      angles: [],
+      overlooked: [],
+      section_briefs: {},
+    };
+  }
+
+  await log(opts.jobId, "Chief Strategist", "thought", "Research plan", parsed.summary, { plan: parsed, phase: "planning" }, "done");
+  for (const a of parsed.angles.slice(0, 10)) {
+    await log(opts.jobId, "Chief Strategist", "thought", "Investigative angle", a, { phase: "planning" });
+  }
+  for (const o of parsed.overlooked.slice(0, 10)) {
+    await log(opts.jobId, "Chief Strategist", "thought", "Overlooked angle", o, { phase: "planning" });
+  }
+  return parsed;
+}
+
+/** Generate 40+ dynamic queries for a section via AI (with fallbacks). */
+async function generateSectionQueries(opts: {
+  companyName: string;
+  companyUrl?: string;
+  industry?: string;
+  section: ReturnType<typeof getSection>;
+  plan: ResearchPlan;
+  provider: ProviderConfig;
+  target: number;
+}): Promise<string[]> {
+  const briefKey = String(opts.section.number);
+  const emphasis = opts.plan.section_briefs?.[briefKey] ?? opts.section.focus;
+  const system = `You generate diverse, high-signal web search queries for a B2B intelligence agent.
+Return STRICT JSON array of strings. Each query 5–14 words, mixing quoted names, operators
+(site:, filetype:, "vs", "review", "pricing", years). Cover primary facts, second-order effects,
+competitor comparisons, customer voice, regulatory/legal, hiring/leadership, financial signals,
+negative press. No duplicates.`;
+
+  const user = `Target: ${opts.companyName} (${opts.companyUrl ?? "no website"}, industry: ${opts.industry ?? "unspecified"})
+Section ${opts.section.number}: ${opts.section.name}
+Emphasis: ${emphasis}
+Overlooked angles: ${opts.plan.overlooked.slice(0, 6).join(" | ") || "n/a"}
+
+Return a JSON array of exactly ${opts.target} distinct search queries. JSON only.`;
+
+  let generated: string[] = [];
+  try {
+    const raw = await aiComplete(opts.provider, system, user, 2200);
+    const parsed = parseJsonLoose<string[]>(raw, []);
+    generated = parsed
+      .filter((q): q is string => typeof q === "string")
+      .map((q) => q.trim())
+      .filter((q) => q.length > 4 && q.length < 240);
+  } catch {
+    generated = [];
+  }
+
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const q of generated) {
+    const key = q.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(q);
+  }
+  if (out.length < 12) {
+    const fallback = opts.section.searchTemplates({
+      company: opts.companyName,
+      url: normalizeUrl(opts.companyUrl),
+      industry: opts.industry,
+    });
+    for (const q of fallback) if (!seen.has(q.toLowerCase())) { seen.add(q.toLowerCase()); out.push(q); }
+  }
+  return out.slice(0, opts.target);
+}
+
+/** After the initial pass, ask the model what's still missing. */
+async function findResearchGaps(opts: {
+  section: ReturnType<typeof getSection>;
+  companyName: string;
+  snippets: string;
+  provider: ProviderConfig;
+}): Promise<{ satisfied: boolean; followups: string[]; reasoning: string }> {
+  const system = `You audit whether collected search snippets are sufficient to write a rigorous
+intelligence section. Output STRICT JSON: {"satisfied": boolean, "reasoning": "1-3 sentences",
+"followups": ["additional search queries to fill gaps, 0–12 items"]}. If satisfied, followups=[].`;
+  const user = `Section ${opts.section.number}: ${opts.section.name} (focus: ${opts.section.focus})
+Target: ${opts.companyName}
+
+Collected snippets (truncated):
+${opts.snippets.slice(0, 8000)}
+
+Return JSON only.`;
+  try {
+    const raw = await aiComplete(opts.provider, system, user, 900);
+    return parseJsonLoose(raw, { satisfied: true, followups: [], reasoning: "" });
+  } catch {
+    return { satisfied: true, followups: [], reasoning: "gap-check skipped" };
+  }
+}
+
 export async function runSection(opts: {
+
   jobId: string;
   userId: string;
   sectionNumber: number;
